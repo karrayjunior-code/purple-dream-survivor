@@ -10,9 +10,9 @@
   html,body{margin:0;height:100%;overflow:hidden;background:#0b0418;font-family:'VT323',monospace;color:#f3e9ff;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
   #c{position:fixed;inset:0;width:100vw;height:100vh;image-rendering:pixelated;display:block}
   #hud{position:fixed;inset:0;pointer-events:none}
-  #xpbar{position:fixed;top:0;left:0;right:0;height:9px;background:#1b0b33;border-bottom:1px solid #6b3fd6}
+  #xpbar{position:fixed;top:0;left:0;right:0;height:14px;background:#1b0b33;border-bottom:1px solid #6b3fd6}
   #xpfill{height:100%;width:0;background:linear-gradient(90deg,#7b3cff,#4ff0ff);box-shadow:0 0 8px #8b5cff}
-  .top{position:fixed;top:14px;left:10px;right:10px;display:flex;justify-content:space-between;align-items:flex-start;font-size:22px;text-shadow:0 0 6px #7a3cff,0 2px 0 #000}
+  .top{position:fixed;top:20px;left:10px;right:10px;display:flex;justify-content:space-between;align-items:flex-start;font-size:22px;text-shadow:0 0 6px #7a3cff,0 2px 0 #000}
   #hpbar{width:150px;height:12px;background:#2a0d18;border:1px solid #ff5c8a;margin-top:4px}
   #hpfill{height:100%;width:100%;background:linear-gradient(90deg,#ff2a6a,#ff8ab0)}
   .mid{text-align:center;position:absolute;left:50%;top:0;transform:translateX(-50%)}
@@ -336,13 +336,13 @@ const B = {
 B.minignome = B.gnome;
 
 const ETYPES = {
-  // Tamaño y radio al 80%, velocidad ~62%, daño por contacto ~50% respecto a la versión anterior
-  goblin:    { hp: 6,   speed: 2.6, dmg: 3,  r: 0.4,  xp: 1, sc: 0.8,  color: 0x55ff55 },
-  eye:       { hp: 10,  speed: 2.0, dmg: 4,  r: 0.48, xp: 2, sc: 0.8,  color: 0xff8888 },
-  gnome:     { hp: 12,  speed: 1.85, dmg: 4, r: 0.4,  xp: 2, sc: 0.8,  color: 0x6688ff, split: true },
-  minignome: { hp: 4,   speed: 3.0, dmg: 2,  r: 0.28, xp: 1, sc: 0.44, color: 0x6688ff },
-  skeleton:  { hp: 24,  speed: 1.25, dmg: 5, r: 0.44, xp: 3, sc: 0.8,  color: 0xeeeedd },
-  hooded:    { hp: 16,  speed: 1.6, dmg: 4,  r: 0.44, xp: 3, sc: 0.8,  color: 0xff3333, shoots: true },
+  // Tamaño y radio al 95%, velocidad ~62%, daño por contacto ~50% respecto a la versión anterior
+  goblin:    { hp: 6,   speed: 2.6, dmg: 3,  r: 0.48, xp: 1, sc: 0.95,  color: 0x55ff55 },
+  eye:       { hp: 10,  speed: 2.0, dmg: 4,  r: 0.57, xp: 2, sc: 0.95,  color: 0xff8888 },
+  gnome:     { hp: 12,  speed: 1.85, dmg: 4, r: 0.48, xp: 2, sc: 0.95,  color: 0x6688ff, split: true },
+  minignome: { hp: 4,   speed: 3.0, dmg: 2,  r: 0.33, xp: 1, sc: 0.52, color: 0x6688ff },
+  skeleton:  { hp: 24,  speed: 1.25, dmg: 5, r: 0.52, xp: 3, sc: 0.95,  color: 0xeeeedd },
+  hooded:    { hp: 16,  speed: 1.6, dmg: 4,  r: 0.52, xp: 3, sc: 0.95,  color: 0xff3333, shoots: true },
   boss:      { hp: 900, speed: 1.7, dmg: 25, r: 2.6,  xp: 0, sc: 1,    color: 0xffaa33, boss: true },
 };
 const WAVES = [
@@ -494,7 +494,7 @@ function enemyBolt(x, z, dx, dz, sp, dmg, y = 1.2) {
 function dropGem(x, z, v) {
   if (gems.length > 300) { pick(gems).val += v; return; }
   const tier = v >= 5 ? 2 : v >= 2 ? 1 : 0;
-  const m = new THREE.Mesh(G.oct, M.gem[tier]); m.scale.setScalar(0.2 + tier * 0.08); m.position.set(x, 0.5, z); scene.add(m);
+  const m = new THREE.Mesh(G.oct, M.gem[tier]); const gs = 0.36 + tier * 0.12; m.scale.set(gs, gs * 1.4, gs); m.position.set(x, 0.5, z); scene.add(m);
   gems.push({ mesh: m, val: v, pull: false, heal: 0 });
 }
 function dropHeal(x, z) {
@@ -797,7 +797,7 @@ function update(dt) {
   sepGrid.clear();
   for (let i = 0; i < enemies.length; i++) {
     const e = enemies[i]; if (e.dead || e.def.boss) continue;
-    e.ci = i; e.cx = Math.floor(e.g.position.x); e.cz = Math.floor(e.g.position.z);
+    e.ci = i; e.cx = Math.floor(e.g.position.x / 1.25); e.cz = Math.floor(e.g.position.z / 1.25);
     const k = e.cx * 4096 + e.cz; let c = sepGrid.get(k); if (!c) { c = []; sepGrid.set(k, c); } c.push(e);
   }
   for (const a of enemies) {
@@ -834,7 +834,7 @@ function update(dt) {
   // Cristales
   const mr = magnetR();
   for (let i = gems.length - 1; i >= 0; i--) {
-    const gm = gems[i], m = gm.mesh; m.rotation.y += dt * 3; m.position.y = 0.5 + Math.sin(time * 4 + i) * 0.1;
+    const gm = gems[i], m = gm.mesh; m.rotation.y += dt * 3; m.position.y = 0.7 + Math.sin(time * 4 + i) * 0.12;
     const dx = P.pos.x - m.position.x, dz = P.pos.z - m.position.z, d = Math.hypot(dx, dz);
     if (d < mr) gm.pull = true;
     if (gm.pull) { const s = Math.min(d, 16 * dt); m.position.x += dx / (d || 1) * s; m.position.z += dz / (d || 1) * s; }
