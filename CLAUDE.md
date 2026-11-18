@@ -38,9 +38,9 @@ Inspirada en la tendencia de TikTok de CGI de finales de los 90 / principios de 
 
 **Pasivas:** Botas de niebla (velocidad), Corazón astral (vida), Imán de cristales (recogida), Orbe arcano (daño), Reloj de arena (cadencia).
 
-**Enemigos (mucha variedad):** goblins, esqueletos, ojos flotantes, encapuchados rojos (disparan) y gnomos súper raros (el gnomo se divide en mini-gnomos; se quieren más variantes raras).
+**Enemigos (mucha variedad):** goblins, esqueletos, ojos flotantes, encapuchados rojos (disparan) y gnomos súper raros (el gnomo se divide en 2 gnomos más débiles del mismo tamaño; se quieren más variantes raras).
 
-**Jefes:** gigantes surrealistas (Sol con Cara ✅ implementado, gigante de piedra con rayos), magos oscuros (uno que copia tus hechizos), criaturas enormes (árbol vivo, dragón low-poly) y el rey gnomo.
+**Jefes:** gigantes surrealistas (**Helioth, el Sol que Sueña** ✅ implementado — sol con cara; la barra de vida muestra solo "Helioth" y el aviso el nombre completo —, gigante de piedra con rayos), magos oscuros (uno que copia tus hechizos), criaturas enormes (árbol vivo, dragón low-poly) y el rey gnomo.
 
 ## Guía visual (referencia para todo cambio gráfico)
 Sacada de capturas de la tendencia "old dark fantasy" (CGI de finales de los 90). Copiar el **estilo**, nunca personajes ni escenas concretas.
@@ -74,11 +74,11 @@ Sacada de capturas de la tendencia "old dark fantasy" (CGI de finales de los 90)
 - `index.html`: toda la demo en un solo archivo (HTML + CSS + JS).
 - `vendor/three.min.js`: Three.js r128 (sin dependencias de CDN). `vendor/GLTFLoader.js`: cargador glTF de r128 (minificado).
 - `models/`: mago, esqueleto y encapuchado de KayKit (CC0), recortados con `tools/prepare-models.mjs` (accesorios fuera, pocas animaciones, menos polígonos, recoloreados).
-- Goblin, ojo, gnomo y Sol con Cara están hechos por código con el mismo estilo (color por vértice + sombreado plano).
+- Goblin, ojo, gnomo y Helioth (el sol) están hechos por código con el mismo estilo (color por vértice + sombreado plano).
 - Todo se dibuja con la paleta de la Guía visual, shader de personaje y un post-proceso de color final.
 - Enemigos: sus animaciones (andar, golpe, morir) se hornean en fotogramas al cargar y se dibujan con InstancedMesh (pocas draw calls con 400 enemigos). El mago usa animaciones reales (correr, hechizo, golpe, morir).
 - Publicado con GitHub Pages: https://karrayjunior-code.github.io/purple-dream-survivor/
-- Implementado: 6 poderes, 5 pasivas, 6 tipos de enemigo, jefe Sol con Cara a los 2:30, joystick táctil, pausa, mejor tiempo guardado.
+- Implementado: 6 poderes, 5 pasivas, 6 tipos de enemigo, jefe Helioth a los 2:30, joystick táctil, pausa, mejor tiempo guardado.
 - Pendiente: sonido/música, resto de jefes, balance de dificultad, SDK de CrazyGames.
 
 ## Forma de trabajar

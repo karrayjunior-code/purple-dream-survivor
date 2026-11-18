@@ -65,7 +65,7 @@
     </div>
     <div class="mid">
       <div id="timer">00:00</div>
-      <div id="bosswrap"><div id="bossname">☀ El Sol con Cara</div><div id="bossbar"><div id="bossfill"></div></div></div>
+      <div id="bosswrap"><div id="bossname">☀ Helioth</div><div id="bossbar"><div id="bossfill"></div></div></div>
     </div>
     <div class="right">
       <div>💀 <span id="kills">0</span></div>
@@ -442,7 +442,7 @@ const PROC = {
     R.pop();
   },
 };
-// Jefe Sol con Cara (modelo único, no instanciado): piedra de fuego con venas de lava y ojos brillantes
+// Jefe Helioth, el Sol que Sueña (modelo único, no instanciado): piedra de fuego con venas de lava y ojos brillantes
 const bossMat = charMat.clone();
 bossMat.onBeforeCompile = sh => charShader(sh, { vein: 'vec3(2.2, 1.1, 0.15)', veinScale: 0.4 });
 function buildBoss() {
@@ -480,7 +480,7 @@ const ETYPES = {
   goblin:    { hp: 6,   speed: 2.6, dmg: 3,  r: 0.48, xp: 1, sc: 0.95,  color: 0x55ff55 },
   eye:       { hp: 10,  speed: 2.0, dmg: 4,  r: 0.57, xp: 2, sc: 0.95,  color: 0xff8888 },
   gnome:     { hp: 12,  speed: 1.85, dmg: 4, r: 0.48, xp: 2, sc: 0.95,  color: 0x6688ff, split: true },
-  minignome: { hp: 4,   speed: 3.0, dmg: 2,  r: 0.33, xp: 1, sc: 0.52, color: 0x6688ff },
+  minignome: { hp: 4,   speed: 3.0, dmg: 2,  r: 0.48, xp: 1, sc: 0.95, color: 0x6688ff },
   skeleton:  { hp: 24,  speed: 1.25, dmg: 5, r: 0.52, xp: 3, sc: 0.95,  color: 0xeeeedd },
   hooded:    { hp: 16,  speed: 1.6, dmg: 4,  r: 0.52, xp: 3, sc: 0.95,  color: 0xff3333, shoots: true },
   boss:      { hp: 900, speed: 1.7, dmg: 25, r: 2.6,  xp: 0, sc: 1,    color: 0xffaa33, boss: true },
@@ -738,7 +738,7 @@ function spawnBoss() {
   boss = spawnEnemy('boss');
   bossLight.intensity = 2.2;
   $('bosswrap').style.display = 'block';
-  banner('☀ ¡El Sol con Cara despierta! ☀', 3);
+  banner('☀ ¡Despierta Helioth, el Sol que Sueña! ☀', 3);
 }
 function hurt(e, dmg) {
   if (e.dead) return; e.hp -= dmg; e.hitT = 0.12;
@@ -755,7 +755,7 @@ function kill(e) {
     for (let i = 0; i < 20; i++) dropGem(p.x + rand(-3, 3), p.z + rand(-3, 3), 6);
     dropHeal(p.x, p.z);
     boss = null; bossCount++; nextBoss = time + 180; bossLight.intensity = 0; $('bosswrap').style.display = 'none';
-    banner('¡Has derrotado al Sol! Sigue sobreviviendo…', 3);
+    banner('¡Has derrotado a Helioth! Sigue sobreviviendo…', 3);
     return;
   }
   dropGem(p.x, p.z, e.def.xp);
