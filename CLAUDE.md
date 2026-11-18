@@ -44,10 +44,13 @@ Inspirada en la tendencia de TikTok de CGI de finales de los 90 / principios de 
 
 ## Estado actual
 - `index.html`: toda la demo en un solo archivo (HTML + CSS + JS).
-- `vendor/three.min.js`: Three.js r128 (sin dependencias de CDN).
+- `vendor/three.min.js`: Three.js r128 (sin dependencias de CDN). `vendor/GLTFLoader.js`: cargador glTF de r128 (minificado).
+- `models/`: mago, esqueleto y encapuchado de KayKit (CC0), recortados con `tools/prepare-models.mjs` (accesorios fuera, pocas animaciones, menos polígonos, recoloreados).
+- Goblin, ojo, gnomo y Sol con Cara están hechos por código con el mismo estilo (color por vértice + sombreado plano).
+- Enemigos: sus animaciones (andar, golpe, morir) se hornean en fotogramas al cargar y se dibujan con InstancedMesh (pocas draw calls con 400 enemigos). El mago usa animaciones reales (correr, hechizo, golpe, morir).
 - Publicado con GitHub Pages: https://karrayjunior-code.github.io/purple-dream-survivor/
 - Implementado: 6 poderes, 5 pasivas, 6 tipos de enemigo, jefe Sol con Cara a los 2:30, joystick táctil, pausa, mejor tiempo guardado.
-- Pendiente: sonido/música, feedback de golpes, modelos más detallados y animaciones, resto de jefes, balance de dificultad, SDK de CrazyGames.
+- Pendiente: sonido/música, resto de jefes, balance de dificultad, SDK de CrazyGames.
 
 ## Forma de trabajar
 - El dueño prueba desde el **móvil** usando el enlace de GitHub Pages: después de cada cambio, haz commit y push a `main` para que se publique.

@@ -104,6 +104,7 @@
 </div>
 
 <script src="vendor/three.min.js"></script>
+<script src="vendor/GLTFLoader.js"></script>
 <script>
 (() => {
 const $ = id => document.getElementById(id);
@@ -253,87 +254,154 @@ const sparkles = new THREE.Points(spGeo, new THREE.PointsMaterial({ size: 0.2, c
 scene.add(sparkles);
 
 // ---------- Personajes ----------
+// Todos comparten el mismo estilo: color por vértice + sombreado plano (proporciones y colores tipo KayKit, look retro).
+const charMat = new THREE.MeshPhongMaterial({ vertexColors: true, flatShading: true, shininess: 14, specular: 0x2a1a44 });
+const CG = {
+  sph: new THREE.SphereGeometry(1, 8, 5), ico: new THREE.IcosahedronGeometry(1, 2),
+  cyl: new THREE.CylinderGeometry(1, 1, 1, 6, 1, true), cylT: new THREE.CylinderGeometry(0.75, 1, 1, 8), cone: new THREE.ConeGeometry(1, 1, 6),
+  box: new THREE.BoxGeometry(1, 1, 1), half: new THREE.SphereGeometry(1, 8, 3, 0, TAU, 0, Math.PI / 2),
+};
+for (const k in CG) {
+  const g = CG[k];
+  if (!g.index) { const n = g.attributes.position.count, ix = new Uint16Array(n); for (let i = 0; i < n; i++) ix[i] = i; g.setIndex(new THREE.BufferAttribute(ix, 1)); }
+  g.computeBoundingBox();
+}
+const _v = new THREE.Vector3(), _c = new THREE.Color(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
+const mtx = (x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = sx, sz = sx) => new THREE.Matrix4().compose(_p.set(x, y, z), _q.setFromEuler(_e.set(rx, ry, rz)), _s.set(sx, sy, sz));
+// Mini-rig: pila de transformaciones para montar personajes por piezas
+function Rig() {
+  const parts = [], st = [new THREE.Matrix4()];
+  return {
+    parts,
+    push(x, y, z, rx, ry, rz, sx, sy, sz) { st.push(st[st.length - 1].clone().multiply(mtx(x, y, z, rx, ry, rz, sx, sy, sz))); return this; },
+    pop() { st.pop(); return this; },
+    add(geo, color, sx, sy, sz, x, y, z, rx, ry, rz, grad = 0.45) { parts.push({ geo, color, grad, m: st[st.length - 1].clone().multiply(mtx(x, y, z, rx, ry, rz, sx, sy, sz)) }); return this; },
+  };
+}
+// Une piezas en una sola geometría con color por vértice (degradado vertical, como la textura de KayKit)
+function mergeParts(parts) {
+  let nv = 0, ni = 0;
+  for (const p of parts) { nv += p.geo.attributes.position.count; ni += p.geo.index.count; }
+  const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3), idx = new (nv > 65535 ? Uint32Array : Uint16Array)(ni);
+  let vo = 0, io = 0;
+  for (const p of parts) {
+    const a = p.geo.attributes.position, bb = p.geo.boundingBox, h = bb.max.y - bb.min.y || 1; _c.set(p.color);
+    for (let i = 0; i < a.count; i++) {
+      _v.fromBufferAttribute(a, i); const k = 1 - p.grad * 0.6 + p.grad * (_v.y - bb.min.y) / h;
+      _v.applyMatrix4(p.m); const o = (vo + i) * 3;
+      pos[o] = _v.x; pos[o + 1] = _v.y; pos[o + 2] = _v.z; col[o] = _c.r * k; col[o + 1] = _c.g * k; col[o + 2] = _c.b * k;
+    }
+    const ix = p.geo.index.array; for (let i = 0; i < ix.length; i++) idx[io + i] = ix[i] + vo;
+    vo += a.count; io += ix.length;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setIndex(new THREE.BufferAttribute(idx, 1));
+  return g;
+}
+// Parámetros de pose para andar / recibir golpe / morir (t de 0 a 1)
+function poseOf(anim, t) {
+  const o = { leg: 0, arm: 0, up: 0, bob: 0, lean: 0, fall: 0, sq: 1, head: 0, p: t * TAU };
+  if (anim === 'walk') { o.leg = Math.sin(o.p) * 0.75; o.arm = -Math.sin(o.p) * 0.7; o.bob = Math.abs(Math.cos(o.p)) * 0.07; o.lean = 0.12; o.head = Math.sin(o.p * 2) * 0.05; }
+  else if (anim === 'hit') { const k = Math.sin(t * Math.PI); o.lean = -0.5 * k; o.sq = 1 - 0.14 * k; o.up = 1.1 * k; o.head = -0.35 * k; }
+  else { const k = Math.min(1, t * 1.25); o.fall = 1 - (1 - k) * (1 - k); o.up = 1.5 * o.fall; o.leg = 0.35 * o.fall; o.sq = 1 - 0.12 * o.fall; o.head = -0.45 * o.fall; }
+  return o;
+}
+const PROC = {
+  goblin(R, anim, t) {
+    const o = poseOf(anim, t), SK = 0x52c42e, CL = 0x8a4a22, DK = 0x3b2410;
+    R.push(0, o.bob, 0, o.lean - o.fall * 1.45);
+    for (const s of [-1, 1]) { R.push(0.13 * s, 0.36, 0, o.leg * s); R.add(CG.cyl, SK, 0.085, 0.3, 0.085, 0, -0.15, 0); R.add(CG.box, DK, 0.16, 0.1, 0.25, 0, -0.32, 0.04, 0, 0, 0, 0.2); R.pop(); }
+    R.push(0, 0.34, 0, 0, 0, 0, 1, o.sq, 1);
+    R.add(CG.sph, SK, 0.27, 0.26, 0.23, 0, 0.2, 0);
+    R.add(CG.cylT, CL, 0.26, 0.14, 0.23, 0, 0.07, 0, 0, 0, 0, 0.25);
+    for (const s of [-1, 1]) { R.push(0.26 * s, 0.36, 0, o.arm * s - o.up, 0, s * (0.3 + o.up * 0.5)); R.add(CG.cyl, SK, 0.07, 0.3, 0.07, 0, -0.15, 0); R.add(CG.sph, SK, 0.1, 0.1, 0.1, 0, -0.32, 0); R.pop(); }
+    R.push(0, 0.5, 0.03, o.head);
+    R.add(CG.sph, SK, 0.37, 0.32, 0.33, 0, 0.22, 0);
+    for (const s of [-1, 1]) {
+      R.add(CG.cone, SK, 0.1, 0.45, 0.06, 0.42 * s, 0.3, -0.02, 0, 0, -s * 1.2);
+      R.add(CG.sph, 0xfff04a, 0.1, 0.11, 0.06, 0.14 * s, 0.27, 0.28, 0, 0, 0, 0.1);
+      R.add(CG.sph, 0x140808, 0.045, 0.06, 0.03, 0.14 * s, 0.27, 0.33, 0, 0, 0, 0);
+      R.add(CG.box, 0x2a6018, 0.14, 0.04, 0.05, 0.14 * s, 0.4, 0.27, 0, 0, s * 0.3, 0);
+    }
+    R.add(CG.cone, 0x3f9a22, 0.07, 0.18, 0.07, 0, 0.18, 0.36, Math.PI / 2, 0, 0, 0.2);
+    R.add(CG.box, 0x2a0c08, 0.22, 0.05, 0.04, 0, 0.07, 0.3, 0, 0, 0, 0);
+    R.add(CG.cone, 0xffffff, 0.035, 0.07, 0.035, 0.07, 0.11, 0.32, 0, 0, 0, 0); R.add(CG.cone, 0xffffff, 0.035, 0.07, 0.035, -0.07, 0.11, 0.32, 0, 0, 0, 0);
+    R.pop(); R.pop(); R.pop();
+  },
+  gnome(R, anim, t) {
+    const o = poseOf(anim, t), SK = 0xf4b48a, BODY = 0x2f4ee0, BOOT = 0x6a3418, HAT = 0xe8203c, BEARD = 0xf6f2ff;
+    R.push(0, o.bob, 0, o.lean - o.fall * 1.45);
+    for (const s of [-1, 1]) { R.push(0.12 * s, 0.26, 0, o.leg * s); R.add(CG.cyl, 0x1d2a80, 0.085, 0.2, 0.085, 0, -0.1, 0); R.add(CG.box, BOOT, 0.16, 0.1, 0.26, 0, -0.22, 0.04, 0, 0, 0, 0.2); R.pop(); }
+    R.push(0, 0.24, 0, 0, 0, 0, 1, o.sq, 1);
+    R.add(CG.sph, BODY, 0.3, 0.29, 0.27, 0, 0.2, 0);
+    R.add(CG.cylT, 0x2a1a10, 0.29, 0.06, 0.27, 0, 0.12, 0, 0, 0, 0, 0.1);
+    R.add(CG.box, 0xffd23a, 0.08, 0.06, 0.03, 0, 0.12, 0.27, 0, 0, 0, 0);
+    for (const s of [-1, 1]) { R.push(0.27 * s, 0.32, 0, o.arm * s - o.up, 0, s * (0.3 + o.up * 0.5)); R.add(CG.cyl, BODY, 0.065, 0.26, 0.065, 0, -0.13, 0); R.add(CG.sph, SK, 0.085, 0.085, 0.085, 0, -0.28, 0); R.pop(); }
+    R.push(0, 0.45, 0.02, o.head);
+    R.add(CG.sph, SK, 0.3, 0.28, 0.28, 0, 0.2, 0);
+    R.add(CG.cone, BEARD, 0.27, 0.42, 0.17, 0, -0.02, 0.17, Math.PI - 0.15, 0, 0, 0.3);
+    R.add(CG.sph, BEARD, 0.2, 0.12, 0.1, 0, 0.12, 0.25, 0, 0, 0, 0.2);
+    R.add(CG.sph, 0xff6a80, 0.12, 0.11, 0.12, 0, 0.18, 0.3, 0, 0, 0, 0.25);
+    for (const s of [-1, 1]) { R.add(CG.sph, 0xffffff, 0.07, 0.08, 0.04, 0.11 * s, 0.28, 0.25, 0, 0, 0, 0.1); R.add(CG.sph, 0x101010, 0.035, 0.045, 0.03, 0.11 * s, 0.28, 0.28, 0, 0, 0, 0); }
+    R.add(CG.cylT, HAT, 0.31, 0.08, 0.31, 0, 0.36, -0.02, -0.12, 0, 0, 0.2);
+    R.push(0, 0.38, -0.03, -0.18);
+    R.add(CG.cone, HAT, 0.28, 0.6, 0.28, 0, 0.3, 0);
+    R.add(CG.cone, HAT, 0.14, 0.4, 0.14, 0, 0.66, -0.12, -0.55, 0, 0);
+    R.pop(); R.pop(); R.pop(); R.pop();
+  },
+  eye(R, anim, t) {
+    const o = poseOf(anim, t), FL = 0xf07a7a, WING = 0x6a2a9a;
+    let y = 1.6, flap = Math.sin(o.p * 2) * 0.6, sway = Math.sin(o.p) * 0.35, lid = 0;
+    if (anim === 'walk') y += Math.sin(o.p) * 0.12;
+    if (anim === 'hit') { lid = Math.sin(t * Math.PI); flap = 0.9 * lid; }
+    if (anim === 'die') { y = 1.6 - 1.2 * o.fall; lid = o.fall; flap = -0.8 * o.fall; sway = 0.6 * o.fall; }
+    R.push(0, y, 0, o.lean * 0.6 - o.fall * 1.2, 0, 0, 1, o.sq, 1);
+    R.add(CG.sph, FL, 0.5, 0.46, 0.48, 0, 0, 0, 0, 0, 0, 0.6);
+    R.add(CG.sph, 0xfff6ee, 0.37, 0.32, 0.2, 0, 0, 0.35, 0, 0, 0, 0.2);
+    R.add(CG.sph, 0xffa21a, 0.18, 0.18, 0.07, 0, 0, 0.52, 0, 0, 0, 0.3);
+    R.add(CG.sph, 0x0a0410, 0.08, 0.08, 0.04, 0, 0, 0.58, 0, 0, 0, 0);
+    R.add(CG.half, FL, 0.4, 0.2 + lid * 0.2, 0.3, 0, 0.12 - lid * 0.1, 0.3, 0.5 - lid * 0.4, 0, 0, 0.3);
+    for (const s of [-1, 1]) { R.push(0.42 * s, 0.1, -0.05, 0, 0, s * (0.35 + flap)); R.add(CG.box, WING, 0.55, 0.035, 0.3, s * 0.3, 0, 0, 0, 0, 0, 0.2); R.add(CG.cone, WING, 0.08, 0.28, 0.06, s * 0.62, -0.08, 0, 0, 0, Math.PI, 0.2); R.pop(); }
+    for (let i = 0; i < 3; i++) {
+      const a = (i - 1) * 0.28, sw = Math.sin(o.p + i * 2.1) * 0.35 + sway * 0.4;
+      R.push(a * 0.9, -0.38, -0.05 + Math.abs(a) * 0.2, sw, 0, a);
+      R.add(CG.cyl, 0xc04a66, 0.06, 0.3, 0.06, 0, -0.14, 0); R.push(0, -0.28, 0, sw * 0.8); R.add(CG.cyl, 0xa03a58, 0.045, 0.26, 0.045, 0, -0.12, 0); R.pop();
+      R.pop();
+    }
+    R.pop();
+  },
+};
+// Jefe Sol con Cara (modelo único, no instanciado)
+const bossMat = charMat.clone();
+function buildBoss() {
+  const g = new THREE.Group(), h = new THREE.Group(); h.position.y = 3.4; g.add(h); g.userData.float = h; g.userData.fy = 3.4;
+  let R = Rig();
+  R.add(CG.ico, 0xff7414, 2.1, 2.1, 1.75, 0, 0, 0, 0, 0, 0, 0.6);
+  for (const s of [-1, 1]) {
+    R.add(CG.sph, 0xff3a6a, 0.45, 0.3, 0.15, 1.15 * s, -0.4, 1.32, 0, 0, 0, 0.2);
+    R.add(CG.sph, 0xffffff, 0.55, 0.45, 0.22, 0.72 * s, 0.45, 1.55, 0, 0, 0, 0.2);
+    R.add(CG.sph, 0x140404, 0.22, 0.26, 0.1, 0.66 * s, 0.4, 1.74, 0, 0, 0, 0);
+    R.add(CG.sph, 0xffffff, 0.07, 0.07, 0.04, 0.6 * s, 0.5, 1.83, 0, 0, 0, 0);
+    R.add(CG.box, 0xa83000, 0.7, 0.14, 0.18, 0.75 * s, 1.0, 1.45, 0, 0, s * 0.28, 0.2);
+  }
+  R.add(CG.sph, 0xff8a2a, 0.3, 0.38, 0.32, 0, 0.0, 1.6, 0, 0, 0, 0.4);
+  h.add(new THREE.Mesh(mergeParts(R.parts), bossMat));
+  R = Rig();
+  for (let i = 0; i < 14; i++) { const a = i / 14 * TAU, l = i % 2 ? 1.25 : 1.7; R.add(CG.cone, i % 2 ? 0xffd21a : 0xffa21a, 0.42, l, 0.22, Math.cos(a) * (2.0 + l / 2), Math.sin(a) * (2.0 + l / 2), -0.25, 0, 0, a - Math.PI / 2, 0.5); }
+  const rays = new THREE.Mesh(mergeParts(R.parts), bossMat); h.add(rays); g.userData.rays = rays;
+  R = Rig();
+  R.add(CG.sph, 0x4a0010, 0.72, 0.42, 0.2, 0, 0, 0, 0, 0, 0, 0.2);
+  R.add(CG.sph, 0xff4a7a, 0.4, 0.16, 0.1, 0, -0.18, 0.08, 0, 0, 0, 0.2);
+  R.add(CG.box, 0xffffff, 0.8, 0.1, 0.12, 0, 0.3, 0.05, 0, 0, 0, 0);
+  const mouth = new THREE.Mesh(mergeParts(R.parts), bossMat); mouth.position.set(0, -0.8, 1.6); h.add(mouth); g.userData.mouth = mouth;
+  return g;
+}
+const B = { boss: buildBoss };
 function buildPlayer() {
   const g = new THREE.Group();
-  part(G.cone, M.robe, 0.75, 1.7, 0.75, 0, 0.85, 0, g);
-  part(G.sph, M.skin, 0.3, 0.32, 0.3, 0, 1.85, 0, g);
-  const b = part(G.cone6, M.beard, 0.26, 0.7, 0.2, 0, 1.5, 0.18, g); b.rotation.x = Math.PI;
-  part(G.cyl, M.robe, 0.78, 0.05, 0.78, 0, 2.08, 0, g);
-  const hat = part(G.cone, M.robe, 0.48, 1.4, 0.48, 0, 2.75, -0.08, g); hat.rotation.x = -0.2;
-  part(G.cyl, M.staff, 0.05, 2.4, 0.05, 0.6, 1.2, 0.25, g);
-  part(G.oct, M.orb, 0.18, 0.18, 0.18, 0.6, 2.5, 0.25, g);
   const l = new THREE.PointLight(0xa070ff, 1.6, 12); l.position.set(0, 2.5, 0); g.add(l);
   return g;
 }
-const B = {
-  goblin() {
-    const g = new THREE.Group();
-    part(G.sph, M.goblin, 0.42, 0.45, 0.38, 0, 0.55, 0, g);
-    part(G.sph, M.goblin, 0.36, 0.33, 0.34, 0, 1.15, 0.05, g);
-    const e1 = part(G.cone6, M.goblin, 0.1, 0.55, 0.1, 0.42, 1.25, 0, g); e1.rotation.z = -1.3;
-    const e2 = part(G.cone6, M.goblin, 0.1, 0.55, 0.1, -0.42, 1.25, 0, g); e2.rotation.z = 1.3;
-    part(G.sph, M.gEye, 0.08, 0.06, 0.05, 0.13, 1.2, 0.33, g); part(G.sph, M.gEye, 0.08, 0.06, 0.05, -0.13, 1.2, 0.33, g);
-    part(G.box, M.white, 0.3, 0.06, 0.05, 0, 1.03, 0.36, g);
-    return g;
-  },
-  skeleton() {
-    const g = new THREE.Group();
-    part(G.box, M.bone, 0.12, 0.75, 0.12, 0, 1.0, 0, g);
-    for (let i = 0; i < 3; i++) part(G.box, M.bone, 0.55 - i * 0.08, 0.06, 0.25, 0, 1.25 - i * 0.15, 0, g);
-    part(G.box, M.bone, 0.42, 0.12, 0.2, 0, 0.64, 0, g);
-    part(G.box, M.bone, 0.1, 0.62, 0.1, 0.14, 0.31, 0, g); part(G.box, M.bone, 0.1, 0.62, 0.1, -0.14, 0.31, 0, g);
-    const a1 = part(G.box, M.bone, 0.08, 0.6, 0.08, 0.36, 1.05, 0.1, g); a1.rotation.z = 0.25; a1.rotation.x = -0.6;
-    const a2 = part(G.box, M.bone, 0.08, 0.6, 0.08, -0.36, 1.05, 0.1, g); a2.rotation.z = -0.25; a2.rotation.x = -0.6;
-    part(G.sph, M.bone, 0.27, 0.28, 0.27, 0, 1.62, 0, g);
-    part(G.box, M.bone, 0.3, 0.08, 0.2, 0, 1.42, 0.06, g);
-    part(G.sph, M.socket, 0.07, 0.07, 0.05, 0.1, 1.65, 0.23, g); part(G.sph, M.socket, 0.07, 0.07, 0.05, -0.1, 1.65, 0.23, g);
-    return g;
-  },
-  eye() {
-    const g = new THREE.Group(), h = new THREE.Group(); h.position.y = 1.7; g.add(h); g.userData.float = h; g.userData.fy = 1.7;
-    part(G.sph, M.flesh, 0.6, 0.5, 0.55, 0, 0, 0, h);
-    part(G.sph, M.white, 0.45, 0.32, 0.3, 0, 0, 0.33, h);
-    part(G.sph, M.iris, 0.2, 0.2, 0.1, 0, 0, 0.6, h);
-    part(G.sph, M.black, 0.09, 0.09, 0.06, 0, 0, 0.67, h);
-    return g;
-  },
-  hooded() {
-    const g = new THREE.Group();
-    part(G.cone, M.red, 0.6, 1.5, 0.6, 0, 0.75, 0, g);
-    part(G.cone, M.red, 0.85, 0.5, 0.85, 0, 0.25, 0, g);
-    part(G.cone6, M.silver, 0.32, 0.9, 0.32, 0, 1.85, 0, g);
-    part(G.cone6, M.silver, 0.05, 0.8, 0.05, 0, 2.6, 0, g);
-    part(G.sph, M.green, 0.07, 0.04, 0.03, 0.1, 1.75, 0.24, g); part(G.sph, M.green, 0.07, 0.04, 0.03, -0.1, 1.75, 0.24, g);
-    part(G.sph, M.bone, 0.12, 0.16, 0.1, 0, 1.2, 0.42, g);
-    return g;
-  },
-  gnome() {
-    const g = new THREE.Group();
-    part(G.sph, M.gBody, 0.38, 0.42, 0.36, 0, 0.45, 0, g);
-    part(G.sph, M.skin, 0.36, 0.34, 0.34, 0, 1.0, 0, g);
-    const bd = part(G.cone6, M.beard, 0.3, 0.6, 0.2, 0, 0.7, 0.2, g); bd.rotation.x = Math.PI;
-    part(G.sph, M.nose, 0.17, 0.15, 0.22, 0, 0.98, 0.38, g);
-    part(G.sph, M.white, 0.11, 0.13, 0.06, 0.12, 1.13, 0.3, g); part(G.sph, M.white, 0.11, 0.13, 0.06, -0.12, 1.13, 0.3, g);
-    part(G.sph, M.black, 0.05, 0.05, 0.03, 0.12, 1.12, 0.36, g); part(G.sph, M.black, 0.05, 0.05, 0.03, -0.12, 1.12, 0.36, g);
-    const hat = part(G.cone, pick(M.hats), 0.38, 1.4, 0.38, 0, 1.9, -0.08, g); hat.rotation.x = -0.28;
-    const e1 = part(G.cone6, M.skin, 0.07, 0.4, 0.07, 0.38, 1.05, 0, g); e1.rotation.z = -1.2;
-    const e2 = part(G.cone6, M.skin, 0.07, 0.4, 0.07, -0.38, 1.05, 0, g); e2.rotation.z = 1.2;
-    return g;
-  },
-  boss() {
-    const g = new THREE.Group(), h = new THREE.Group(); h.position.y = 3.4; g.add(h); g.userData.float = h; g.userData.fy = 3.4;
-    part(G.sph, M.sun, 2.1, 2.1, 1.6, 0, 0, 0, h);
-    const rays = new THREE.Group(); h.add(rays); g.userData.rays = rays;
-    for (let i = 0; i < 14; i++) { const a = i / 14 * TAU; const r = part(G.cone, M.ray, 0.45, 1.7, 0.25, Math.cos(a) * 2.7, Math.sin(a) * 2.7, -0.2, rays); r.rotation.z = a - Math.PI / 2; }
-    part(G.sph, M.white, 0.55, 0.3, 0.2, 0.75, 0.45, 1.42, h); part(G.sph, M.white, 0.55, 0.3, 0.2, -0.75, 0.45, 1.42, h);
-    part(G.sph, M.black, 0.18, 0.16, 0.08, 0.75, 0.4, 1.6, h); part(G.sph, M.black, 0.18, 0.16, 0.08, -0.75, 0.4, 1.6, h);
-    part(G.sph, M.sun, 0.62, 0.24, 0.3, 0.75, 0.62, 1.48, h); part(G.sph, M.sun, 0.62, 0.24, 0.3, -0.75, 0.62, 1.48, h);
-    part(G.sph, M.sun, 0.3, 0.5, 0.35, 0, -0.05, 1.55, h);
-    part(G.sph, M.lip, 0.7, 0.18, 0.22, 0, -0.75, 1.42, h);
-    return g;
-  },
-};
-B.minignome = B.gnome;
 
 const ETYPES = {
   // Tamaño y radio al 95%, velocidad ~62%, daño por contacto ~50% respecto a la versión anterior
@@ -353,35 +421,160 @@ const WAVES = [
   { t: 110, type: 'hooded', w: 1.5, msg: '🔴 Los encapuchados rojos se acercan…' },
 ];
 
-// ---------- Enemigos instanciados (una draw call por pieza y tipo, no por enemigo) ----------
-const MAX_ENEMIES = 400, INST_CAP = 560;
-const hatMat = mat(0xffffff), hatColors = M.hats.map(m => m.color.clone());
-const RENDER = {};
-for (const type of ['goblin', 'skeleton', 'eye', 'hooded', 'gnome']) {
-  const proto = B[type](); proto.updateMatrixWorld(true);
-  const parts = [];
-  proto.traverse(o => {
-    if (!o.isMesh) return;
-    const hat = M.hats.includes(o.material);
-    const im = new THREE.InstancedMesh(o.geometry, hat ? hatMat : o.material, INST_CAP);
-    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); im.frustumCulled = false; im.count = 0;
-    if (hat) for (let i = 0; i < INST_CAP; i++) im.setColorAt(i, hatColors[i % hatColors.length]);
-    scene.add(im); parts.push({ im, local: o.matrixWorld.clone(), hat });
+// ---------- Enemigos instanciados con animación horneada ----------
+// Cada fotograma de cada animación es una geometría fija; todos los enemigos que están en ese
+// fotograma se dibujan juntos con un InstancedMesh (pocas draw calls aunque haya 400 enemigos).
+const MAX_ENEMIES = 400, INST_CAP = 560, HIT_DUR = 0.3, DIE_DUR = 0.75;
+const PLAN = { walk: 10, hit: 4, die: 8 };
+const GFX = {}, corpses = [], dying = [];
+const frameT = (anim, f, n) => anim === 'walk' ? f / n : anim === 'hit' ? (f + 0.5) / n : f / (n - 1);
+function registerType(rk, frames) {
+  const T = {};
+  for (const anim in frames) T[anim] = frames[anim].map(geo => {
+    const cap = anim === 'walk' ? INST_CAP : 300, im = new THREE.InstancedMesh(geo, charMat, cap);
+    for (let i = 0; i < cap; i++) im.setColorAt(i, _c.setScalar(1));
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); im.frustumCulled = false; im.count = 0; im.visible = false;
+    scene.add(im); return { im, cap, n: 0 };
   });
-  RENDER[type] = { parts, n: 0, float: !!proto.userData.float };
+  GFX[rk] = T;
 }
-const _im = new THREE.Matrix4(), _ib = new THREE.Matrix4(), _it = new THREE.Matrix4();
-function renderEnemies() {
-  for (const k in RENDER) RENDER[k].n = 0;
-  for (const e of enemies) {
-    if (e.dead || !e.rk) continue;
-    const R = RENDER[e.rk]; if (R.n >= INST_CAP) continue;
-    const g = e.g; g.updateMatrix(); _ib.copy(g.matrix);
-    if (e.fly) _ib.multiply(_it.makeTranslation(0, e.fly, 0));
-    for (const p of R.parts) { _im.multiplyMatrices(_ib, p.local); p.im.setMatrixAt(R.n, _im); if (p.hat) p.im.setColorAt(R.n, hatColors[e.hat]); }
-    R.n++;
+function bakeProc(build) {
+  const out = {};
+  for (const anim in PLAN) { out[anim] = []; for (let f = 0; f < PLAN[anim]; f++) { const R = Rig(); build(R, anim, frameT(anim, f, PLAN[anim])); out[anim].push(mergeParts(R.parts)); } }
+  return out;
+}
+// Hornea un modelo glTF con esqueleto (KayKit) a fotogramas fijos
+function bakeGltf(gltf, height) {
+  const root = gltf.scene, mixer = new THREE.AnimationMixer(root), skinned = [];
+  root.traverse(o => { if (o.isSkinnedMesh) skinned.push(o); });
+  const raw = {};
+  for (const anim in PLAN) {
+    const clip = gltf.animations.find(a => a.name === anim), n = PLAN[anim];
+    mixer.stopAllAction(); const act = mixer.clipAction(clip);
+    if (anim !== 'walk') { act.setLoop(THREE.LoopOnce); act.clampWhenFinished = true; }
+    act.play(); raw[anim] = [];
+    for (let f = 0; f < n; f++) {
+      mixer.setTime(frameT(anim, f, n) * clip.duration * (anim === 'walk' ? 1 : 0.999)); root.updateMatrixWorld(true);
+      raw[anim].push(skinned.map(m => {
+        const a = m.geometry.attributes.position, pos = new Float32Array(a.count * 3);
+        for (let i = 0; i < a.count; i++) { m.boneTransform(i, _v); _v.applyMatrix4(m.matrixWorld); pos[i * 3] = _v.x; pos[i * 3 + 1] = _v.y; pos[i * 3 + 2] = _v.z; }
+        return { pos, col: m.geometry.attributes.color, idx: m.geometry.index.array };
+      }));
+    }
   }
-  for (const k in RENDER) for (const p of RENDER[k].parts) { p.im.count = RENDER[k].n; p.im.instanceMatrix.needsUpdate = true; if (p.hat) p.im.instanceColor.needsUpdate = true; }
+  let minY = Infinity, maxY = -Infinity;
+  for (const p of raw.walk[0]) for (let i = 1; i < p.pos.length; i += 3) { minY = Math.min(minY, p.pos[i]); maxY = Math.max(maxY, p.pos[i]); }
+  const k = height / (maxY - minY), out = {};
+  for (const anim in raw) out[anim] = raw[anim].map(parts => {
+    let nv = 0, ni = 0; for (const p of parts) { nv += p.pos.length / 3; ni += p.idx.length; }
+    const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3), idx = new (nv > 65535 ? Uint32Array : Uint16Array)(ni);
+    let vo = 0, io = 0;
+    for (const p of parts) {
+      const n = p.pos.length / 3;
+      for (let i = 0; i < n; i++) { pos[(vo + i) * 3] = p.pos[i * 3] * k; pos[(vo + i) * 3 + 1] = (p.pos[i * 3 + 1] - minY) * k; pos[(vo + i) * 3 + 2] = p.pos[i * 3 + 2] * k; col[(vo + i) * 3] = p.col.getX(i); col[(vo + i) * 3 + 1] = p.col.getY(i); col[(vo + i) * 3 + 2] = p.col.getZ(i); }
+      for (let i = 0; i < p.idx.length; i++) idx[io + i] = p.idx[i] + vo;
+      vo += n; io += p.idx.length;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setIndex(new THREE.BufferAttribute(idx, 1));
+    return g;
+  });
+  return out;
+}
+registerType('goblin', bakeProc(PROC.goblin));
+registerType('gnome', bakeProc(PROC.gnome));
+registerType('eye', bakeProc(PROC.eye));
+const _im = new THREE.Matrix4(), _flash = new THREE.Color();
+function putInst(fm, m, flash) { if (fm.n >= fm.cap) return; fm.im.setMatrixAt(fm.n, m); fm.im.setColorAt(fm.n, _flash.setScalar(flash)); fm.n++; }
+function renderEnemies() {
+  for (const rk in GFX) for (const anim in GFX[rk]) for (const fm of GFX[rk][anim]) fm.n = 0;
+  for (const e of enemies) {
+    if (e.dead || !e.rk || !GFX[e.rk]) continue;
+    const T = GFX[e.rk]; let fm;
+    if (e.hitA > 0) fm = T.hit[Math.min(T.hit.length - 1, Math.floor((1 - e.hitA / HIT_DUR) * T.hit.length))];
+    else { const ph = ((time * (0.55 + e.speed * 0.32) + e.ph / TAU) % 1 + 1) % 1; fm = T.walk[Math.floor(ph * T.walk.length) % T.walk.length]; }
+    e.g.updateMatrix(); putInst(fm, e.g.matrix, e.hitT > 0 ? 2.6 : 1);
+  }
+  for (const c of corpses) {
+    const T = GFX[c.rk]; if (!T) continue;
+    const f = Math.min(T.die.length - 1, Math.floor(c.t / DIE_DUR * T.die.length));
+    _im.copy(c.m); if (c.t > DIE_DUR) _im.elements[13] -= (c.t - DIE_DUR) * 1.6;
+    putInst(T.die[f], _im, 1);
+  }
+  for (const rk in GFX) for (const anim in GFX[rk]) for (const fm of GFX[rk][anim]) {
+    fm.im.count = fm.n; fm.im.visible = fm.n > 0;
+    if (fm.n) { fm.im.instanceMatrix.needsUpdate = true; fm.im.instanceColor.needsUpdate = true; }
+  }
+}
+function updateCorpses(dt) {
+  for (let i = corpses.length - 1; i >= 0; i--) { corpses[i].t += dt; if (corpses[i].t > DIE_DUR + 0.5) corpses.splice(i, 1); }
+  for (let i = dying.length - 1; i >= 0; i--) {
+    const d = dying[i]; d.t += dt; const k = Math.min(1, d.t / 1.3);
+    d.g.rotation.y += dt * (3 + k * 16); d.g.scale.setScalar(Math.max(0.01, 1 - k * k)); d.g.position.y = k * 2.5;
+    if (k >= 1) { scene.remove(d.g); dying.splice(i, 1); }
+  }
+}
+
+// ---------- Mago (modelo KayKit animado) ----------
+const mage = { mixer: null, A: {}, upper: null, uw: 0, rw: 0, castCd: 0, dead: false };
+function starShader(sh) {
+  sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvSP = position;');
+  sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vSP;').replace('#include <map_fragment>', `#include <map_fragment>
+    { vec3 cc = diffuseColor.rgb; float mx = max(max(cc.r, cc.g), cc.b), mn = min(min(cc.r, cc.g), cc.b);
+      if (cc.b >= mx && cc.b > cc.r * 1.2 && mx < 0.65 && mx - mn > 0.1) {
+        diffuseColor.rgb = vec3(0.07, 0.08, 0.38) * (0.5 + mx * 1.4);
+        vec3 c = floor(vSP * STAR_DENSITY); float h = fract(sin(dot(c, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+        if (h > 0.95) diffuseColor.rgb = h > 0.982 ? vec3(1.6, 1.35, 0.5) : vec3(1.25, 1.25, 1.6);
+      } }`);
+}
+function setupMage(gltf) {
+  const m = gltf.scene; m.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(m), s = 2.8 / (bb.max.y - bb.min.y);
+  m.scale.setScalar(s); m.position.y = -bb.min.y * s;
+  let tex = null; m.traverse(o => { if (o.isMesh && o.material.map) tex = o.material.map; });
+  tex.magFilter = tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.encoding = THREE.LinearEncoding; tex.needsUpdate = true;
+  const mk = skinning => { const mt = new THREE.MeshPhongMaterial({ map: tex, flatShading: true, skinning, shininess: 14, specular: 0x2a1a44 }); mt.onBeforeCompile = sh => { starShader(sh); sh.fragmentShader = sh.fragmentShader.replace('STAR_DENSITY', (12 * s).toFixed(3)); }; return mt; };
+  const mS = mk(true), mR = mk(false);
+  m.traverse(o => { if (o.isMesh) { o.material = o.isSkinnedMesh ? mS : mR; o.frustumCulled = false; } });
+  player.add(m);
+  const mixer = new THREE.AnimationMixer(m), clip = n => gltf.animations.find(a => a.name === n);
+  const UP = /spine|chest|neck|head|shoulder|arm|wrist|hand|finger|thumb/i;
+  const sub = (c, up) => new THREE.AnimationClip(c.name + (up ? '_up' : '_lo'), c.duration, c.tracks.filter(t => UP.test(t.name.split('.')[0]) === up));
+  const act = (c, once) => { const a = mixer.clipAction(c); if (once) { a.setLoop(THREE.LoopOnce); a.clampWhenFinished = true; } return a; };
+  Object.assign(mage.A, {
+    idle: act(clip('idle')), run: act(clip('run')), idleLo: act(sub(clip('idle'), false)), runLo: act(sub(clip('run'), false)),
+    cast: act(sub(clip('cast'), true), true), hit: act(sub(clip('hit'), true), true), die: act(clip('die'), true),
+  });
+  mage.A.cast.timeScale = 1.5; mage.A.hit.timeScale = 1.3;
+  mage.mixer = mixer; mageReset();
+}
+function mageReset() {
+  if (!mage.mixer) return;
+  const A = mage.A; mage.mixer.stopAllAction(); mage.dead = false; mage.upper = null; mage.uw = 0; mage.castCd = 0;
+  for (const k of ['idle', 'run', 'idleLo', 'runLo']) A[k].reset().play();
+}
+function mageUpper(name) {
+  if (!mage.mixer || mage.dead) return;
+  const a = mage.A[name]; if (mage.upper && mage.upper !== a) mage.upper.stop();
+  a.reset().play(); mage.upper = a;
+}
+function castAnim() {
+  if (!mage.mixer || mage.castCd > 0 || (mage.upper === mage.A.hit && mage.A.hit.isRunning())) return;
+  mage.castCd = 1.6; mageUpper('cast');
+}
+function mageDie() { if (!mage.mixer) return; mage.dead = true; mage.mixer.stopAllAction(); mage.A.die.reset().play(); }
+function mageAnim(dt, moving) {
+  if (!mage.mixer) return;
+  const A = mage.A;
+  if (!mage.dead) {
+    mage.castCd -= dt;
+    mage.rw += ((moving ? 1 : 0) - mage.rw) * Math.min(1, dt * 10);
+    mage.uw += ((mage.upper && mage.upper.isRunning() ? 1 : 0) - mage.uw) * Math.min(1, dt * 14);
+    A.idle.setEffectiveWeight((1 - mage.rw) * (1 - mage.uw)); A.run.setEffectiveWeight(mage.rw * (1 - mage.uw));
+    A.idleLo.setEffectiveWeight((1 - mage.rw) * mage.uw); A.runLo.setEffectiveWeight(mage.rw * mage.uw);
+    if (mage.upper) mage.upper.setEffectiveWeight(mage.uw);
+  }
+  mage.mixer.update(dt);
 }
 const spawnDist = () => portrait ? 45 : 39;
 
@@ -416,6 +609,7 @@ function clearArr(arr, key) { for (const o of arr) { const m = key ? o[key] : o;
 function reset() {
   clearArr(enemies, 'g'); clearArr(bolts, 'mesh'); clearArr(gems, 'mesh'); clearArr(zones, 'mesh'); clearArr(portals, 'mesh'); clearArr(shrooms, 'mesh');
   for (const f of fx) { scene.remove(f.obj); } fx.length = 0;
+  for (const d of dying) scene.remove(d.g); dying.length = 0; corpses.length = 0; mageReset();
   W.eyes.forEach(m => scene.remove(m)); W.eyes.length = 0; W.moons.forEach(m => scene.remove(m)); W.moons.length = 0;
   P = { pos: new THREE.Vector3(), hp: 100, maxHp: 100, lvl: 1, xp: 0, next: 6, inv: 0, kills: 0, powers: { eye: 1 }, passives: {} };
   time = 0; spawnT = 0.5; nextBoss = 150; boss = null; bossCount = 0; waveIdx = 1; pendingLv = 0;
@@ -433,7 +627,7 @@ function spawnEnemy(type, x, z) {
   if (x === undefined) { const a = rand(0, TAU), d = spawnDist(); x = P.pos.x + Math.cos(a) * d; z = P.pos.z + Math.sin(a) * d; }
   g.position.set(x, 0, z); if (!rk) scene.add(g);
   const hpMul = def.boss ? (1 + bossCount * 0.6) : 1 + time / 60 * 0.45;
-  const e = { type, def, g, hp: def.hp * hpMul, maxHp: def.hp * hpMul, r: def.r, speed: def.speed * rand(0.9, 1.1), dmg: def.dmg, hitT: 0, moonCd: 0, slow: 0, shootT: rand(1.5, 3.5), ph: rand(0, TAU), sc: def.sc, dead: false, rk, fly: 0, hat: (Math.random() * hatColors.length) | 0 };
+  const e = { type, def, g, hp: def.hp * hpMul, maxHp: def.hp * hpMul, r: def.r, speed: def.speed * rand(0.9, 1.1), dmg: def.dmg, hitT: 0, moonCd: 0, slow: 0, shootT: rand(1.5, 3.5), ph: rand(0, TAU), sc: def.sc, dead: false, rk, hitA: -1 };
   enemies.push(e); return e;
 }
 function chooseType() {
@@ -448,11 +642,14 @@ function spawnBoss() {
 }
 function hurt(e, dmg) {
   if (e.dead) return; e.hp -= dmg; e.hitT = 0.12;
+  if (e.hitA < -0.25) e.hitA = HIT_DUR;
   if (e.hp <= 0) kill(e);
 }
 function kill(e) {
-  e.dead = true; scene.remove(e.g); P.kills++;
+  e.dead = true; P.kills++;
   const p = e.g.position;
+  if (e.def.boss) dying.push({ g: e.g, t: 0 });
+  else { e.g.scale.setScalar(e.sc); e.g.updateMatrix(); corpses.push({ rk: e.rk, m: e.g.matrix.clone(), t: 0 }); if (corpses.length > 160) corpses.shift(); }
   puff(p.x, p.z, e.def.color, e.def.boss ? 4 : 1);
   if (e.def.boss) {
     for (let i = 0; i < 20; i++) dropGem(p.x + rand(-3, 3), p.z + rand(-3, 3), 6);
@@ -477,7 +674,7 @@ function enemiesNear(x, z, r) {
 }
 function hurtArea(x, z, r, dmg) { for (const e of enemiesNear(x, z, r + 0.3)) hurt(e, dmg); }
 function damagePlayer(d) {
-  P.hp -= d; P.inv = 0.85;
+  P.hp -= d; P.inv = 0.85; mageUpper('hit');
   const f = $('dmgflash'); f.style.transition = 'none'; f.style.opacity = 1; requestAnimationFrame(() => { f.style.transition = 'opacity .35s'; f.style.opacity = 0; });
 }
 
@@ -551,7 +748,7 @@ function updatePowers(dt) {
     W.eyes.forEach((m, i) => { const a = time * 1.5 + i * TAU / W.eyes.length; m.position.set(P.pos.x + Math.cos(a) * 1.5, 2.7 + Math.sin(time * 3 + i) * 0.15, P.pos.z + Math.sin(a) * 1.5); });
     W.eyeT -= dt;
     if (W.eyeT <= 0) {
-      W.eyeT = Math.max(0.28, 1.0 - 0.11 * pl.eye) * cdm;
+      W.eyeT = Math.max(0.28, 1.0 - 0.11 * pl.eye) * cdm; castAnim();
       for (const m of W.eyes) { const t = nearest(m.position, 18); if (t) { fireBolt(m.position, t.g.position.x, t.g.position.z, (5 + 3 * pl.eye) * dm, Math.floor(pl.eye / 2)); m.lookAt(t.g.position.x, 1, t.g.position.z); } }
     }
   }
@@ -572,7 +769,7 @@ function updatePowers(dt) {
   if (pl.chess) {
     W.chessT -= dt;
     if (W.chessT <= 0) {
-      W.chessT = Math.max(2.2, 5.5 - 0.6 * pl.chess) * cdm;
+      W.chessT = Math.max(2.2, 5.5 - 0.6 * pl.chess) * cdm; castAnim();
       const size = 4.5 + pl.chess * 1.0;
       const m = new THREE.Mesh(G.plane, new THREE.MeshBasicMaterial({ map: checkerTex, transparent: true, opacity: 0, depthWrite: false }));
       m.rotation.x = -Math.PI / 2; m.position.set(P.pos.x, 0.06, P.pos.z); m.scale.set(size, size, 1); scene.add(m);
@@ -592,7 +789,7 @@ function updatePowers(dt) {
   if (pl.portal) {
     W.portalT -= dt;
     if (W.portalT <= 0) {
-      W.portalT = Math.max(3, 7.5 - 0.8 * pl.portal) * cdm;
+      W.portalT = Math.max(3, 7.5 - 0.8 * pl.portal) * cdm; castAnim();
       const c = enemiesNear(P.pos.x, P.pos.z, 14); const t = c.length ? pick(c).g.position : { x: P.pos.x + rand(-5, 5), z: P.pos.z + rand(-5, 5) };
       const r = 2.6 + 0.5 * pl.portal;
       const m = new THREE.Mesh(G.circle, new THREE.MeshBasicMaterial({ map: spiralTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
@@ -615,7 +812,7 @@ function updatePowers(dt) {
   if (pl.storm) {
     W.stormT -= dt;
     if (W.stormT <= 0) {
-      W.stormT = Math.max(0.7, 2.4 - 0.3 * pl.storm) * cdm;
+      W.stormT = Math.max(0.7, 2.4 - 0.3 * pl.storm) * cdm; castAnim();
       const c = enemiesNear(P.pos.x, P.pos.z, 15), n = 1 + Math.floor(pl.storm / 2);
       for (let i = 0; i < n && c.length; i++) {
         const e = c.splice(Math.floor(Math.random() * c.length), 1)[0], x = e.g.position.x, z = e.g.position.z;
@@ -627,7 +824,7 @@ function updatePowers(dt) {
   if (pl.shroom) {
     W.shroomT -= dt;
     if (W.shroomT <= 0) {
-      W.shroomT = Math.max(1.4, 4 - 0.45 * pl.shroom) * cdm;
+      W.shroomT = Math.max(1.4, 4 - 0.45 * pl.shroom) * cdm; castAnim();
       const g = new THREE.Group(); part(G.cyl, M.shroomStem, 0.12, 0.4, 0.12, 0, 0.2, 0, g); part(G.half, M.shroomCap, 0.42, 0.35, 0.42, 0, 0.38, 0, g);
       const x = P.pos.x + rand(-1.5, 1.5), z = P.pos.z + rand(-1.5, 1.5); g.position.set(x, 0, z); scene.add(g);
       shrooms.push({ mesh: g, x, z, fuse: 1.2, r: 2.4 + 0.4 * pl.shroom, dmg: (16 + 9 * pl.shroom) * dm });
@@ -723,6 +920,18 @@ function togglePause() {
 }
 $('pauseBtn').onclick = () => { if (state === 'play' || state === 'pause') togglePause(); };
 $('resumeBtn').onclick = togglePause;
+// ---------- Carga de modelos ----------
+{
+  const btn = $('playBtn'), txt = btn.textContent, loader = new THREE.GLTFLoader();
+  const load = url => new Promise((ok, ko) => loader.load(url, ok, undefined, ko));
+  btn.disabled = true; btn.textContent = 'Cargando…';
+  Promise.all(['models/mago.glb', 'models/esqueleto.glb', 'models/encapuchado.glb'].map(load)).then(([mg, sk, ho]) => {
+    setupMage(mg);
+    registerType('skeleton', bakeGltf(sk, 1.9));
+    registerType('hooded', bakeGltf(ho, 2.2));
+    btn.disabled = false; btn.textContent = txt;
+  }).catch(err => { console.error(err); btn.textContent = 'Error al cargar'; });
+}
 $('playBtn').onclick = () => { reset(); $('start').classList.add('hidden'); state = 'play'; banner('Sobrevive al sueño morado…'); };
 $('againBtn').onclick = () => { reset(); $('over').classList.add('hidden'); state = 'play'; };
 document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'play') togglePause(); });
@@ -733,7 +942,7 @@ function setBest(v) { try { localStorage.setItem('pds_best', v); } catch (e) {} 
 { const b = getBest(); if (b) $('best').textContent = 'Mejor tiempo: ' + fmt(b); }
 
 function gameOver() {
-  state = 'over'; hideJoy();
+  state = 'over'; hideJoy(); player.visible = true; mageDie();
   const best = Math.max(getBest(), time); setBest(best);
   $('overStats').innerHTML = `Tiempo: <b>${fmt(time)}</b><br>Nivel: <b>${P.lvl}</b><br>Enemigos: <b>${P.kills}</b><br>Mejor tiempo: <b>${fmt(best)}</b>`;
   $('over').classList.remove('hidden');
@@ -754,7 +963,7 @@ function update(dt) {
   P.pos.x = Math.max(-180, Math.min(180, P.pos.x + mx * sp * dt));
   P.pos.z = Math.max(-180, Math.min(180, P.pos.z + mz * sp * dt));
   const moving = ml > 0.1;
-  player.position.set(P.pos.x, moving ? Math.abs(Math.sin(time * 10)) * 0.15 : 0, P.pos.z);
+  player.position.set(P.pos.x, 0, P.pos.z); P.moving = moving;
   if (moving) { const target = Math.atan2(mx, mz); let dr = target - player.rotation.y; dr = Math.atan2(Math.sin(dr), Math.cos(dr)); player.rotation.y += dr * Math.min(1, dt * 12); }
   player.visible = P.inv > 0 ? Math.floor(time * 20) % 2 === 0 : true;
   P.inv -= dt;
@@ -779,9 +988,11 @@ function update(dt) {
     const s = e.speed * (e.slow > 0 ? 0.55 : 1);
     g.position.x += dx / d * s * dt; g.position.z += dz / d * s * dt;
     g.rotation.y = Math.atan2(dx, dz);
-    if (e.def.boss) g.userData.float.position.y = g.userData.fy + Math.sin(time * 3 + e.ph) * 0.25;
-    else if (RENDER[e.rk].float) e.fly = Math.sin(time * 3 + e.ph) * 0.25;
-    else g.rotation.z = Math.sin(time * 10 + e.ph) * 0.08;
+    if (e.def.boss) {
+      g.userData.float.position.y = g.userData.fy + Math.sin(time * 3 + e.ph) * 0.25;
+      g.userData.mouth.scale.y = 0.5 + (e.shootT < 0.7 ? (0.7 - e.shootT) * 2.2 : 0);
+      bossMat.emissive.setScalar(e.hitT > 0 ? 0.45 : 0);
+    } else e.hitA -= dt;
     if (e.hitT > 0) { e.hitT -= dt; g.scale.setScalar(e.sc * (1 + e.hitT * 2)); } else g.scale.setScalar(e.sc);
     if (d < e.r + 0.5 && P.inv <= 0) damagePlayer(e.dmg);
     if (e.def.shoots) { e.shootT -= dt; if (e.shootT <= 0 && d < 15) { enemyBolt(g.position.x, g.position.z, dx / d, dz / d, 7, 8); e.shootT = rand(2.5, 4); } }
@@ -845,6 +1056,8 @@ function update(dt) {
     }
   }
 
+  updateCorpses(dt);
+
   // Limpieza
   for (let i = enemies.length - 1; i >= 0; i--) if (enemies[i].dead) enemies.splice(i, 1);
 
@@ -883,6 +1096,7 @@ function loop(now) {
   if (state === 'play') { update(dt); updateHud(); }
   if (state === 'play' || state === 'start') updateFx(dt);
   if (state === 'start') { P.pos.x += dt * 1.2; P.pos.z -= dt * 0.6; player.position.copy(P.pos); player.rotation.y = Math.atan2(1.2, -0.6); }
+  if (state === 'play' || state === 'start' || state === 'over') mageAnim(dt, state === 'start' || (state === 'play' && P.moving));
   if (bannerT > 0) { bannerT -= dt; if (bannerT <= 0) $('banner').style.opacity = 0; }
   camOff.set(0, portrait ? 31.5 : 24, portrait ? 19.5 : 16.5);
   camera.position.lerp(new THREE.Vector3(P.pos.x + camOff.x, camOff.y, P.pos.z + camOff.z), state === 'start' ? 1 : Math.min(1, dt * 8));
