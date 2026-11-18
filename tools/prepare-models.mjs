@@ -23,14 +23,29 @@ const CFG = {
 function rgb2hsv(r, g, b) { const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; let h = 0;
   if (d) h = mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; return [h * 60, mx ? d / mx : 0, mx]; }
 function hsv2rgb(h, s, v) { const f = n => { const k = (n + h / 60) % 6; return v - v * s * Math.max(0, Math.min(k, 4 - k, 1)); }; return [f(5), f(3), f(1)]; }
+// Paleta "old dark fantasy": morados, azul eléctrico, verde ácido, rojo sangre y naranja fuego
+const EYE_MARK = [160 / 255, 1, 32 / 255];   // color marcador de ojos emisivos (el juego lo detecta)
 function grade(c, mode) {
   let [h, s, v] = rgb2hsv(...c);
-  if (mode === 'hooded') {
-    if (h > 90 && h < 180 && s > 0.3) { h = 352; s = Math.min(1, s * 1.1); v = Math.min(1, v * 1.25); }  // capa verde -> roja
-    else if (h > 10 && h < 40 && s > 0.25 && s < 0.6 && v > 0.82) { h = 225; s = 0.12; v *= 0.85; }       // cara -> máscara plateada
+  const skin = h >= 10 && h <= 40 && s > 0.2 && s < 0.62 && v > 0.78;
+  if (mode === 'mage') {
+    if (skin) { h = 275; s = 0.3; }                                              // piel -> lila pálido
+    else if (v < 0.24 && s < 0.45) { h = 290; s = 0.7; v = Math.max(v, 0.12) * 1.3; } // pelo -> morado
+    else if ((h > 300 || h < 10) && s > 0.5) { h = 350; s = 0.95; }              // capa -> rojo sangre
+    else if (h >= 10 && h < 45 && s >= 0.35) { if (s > 0.7 && v > 0.7) { h = 22; s = 1; } else { h = 290; s = 0.6; v *= 0.85; } } // banda -> fuego; cuero -> morado
+    else if (s < 0.15) { h = 222; s = 0.4; }                                      // metal -> azul eléctrico
+  } else if (mode === 'skeleton') {
+    if (h > 30 && h < 70 && s > 0.5 && v > 0.8) return EYE_MARK;
+    if (s < 0.35) { h = 232; s = 0.28 + (1 - v) * 0.35; v = Math.min(1, v * 1.05); } // hueso -> azul eléctrico pálido
+    else if (v > 0.45) { h = 352; s = 0.9; } else { h = 280; s = 0.65; }          // capa -> sangre; cuero -> morado
+  } else if (mode === 'hooded') {
+    if (h > 90 && h < 180 && s > 0.3) { h = 350; s = 0.95; v = Math.min(1, v * 1.1); } // capa -> rojo sangre
+    else if (skin) { h = 260; s = 0.6; v *= 0.16; }                                 // cara -> vacío oscuro (ojos brillantes en el juego)
+    else if (v < 0.25) { h = 260; s = 0.5; v *= 0.5; }
+    else if (h < 50 && s > 0.3) { h = 290; s = 0.6; v *= 0.8; }                     // cuero -> morado
+    else if (s < 0.2) { h = 225; s = 0.45; }                                         // metal -> azul
   }
-  if (mode === 'skeleton' && s < 0.35 && v > 0.55) { s *= 0.35; v = Math.min(1, v * 1.1); }                // huesos más blancos
-  if (s > 0.3) s = Math.min(1, s * 1.3);                                                                 // más saturado (retro), sin teñir blancos/huesos
+  if (s > 0.3) s = Math.min(1, s * 1.3);                                             // más saturado (retro)
   return hsv2rgb(h, s, v);
 }
 const decode = img => PNG.sync.read(Buffer.from(img));
@@ -43,7 +58,7 @@ function shrink(png, size) {
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     const acc = [0, 0, 0];
     for (let j = 0; j < k; j++) for (let i = 0; i < k; i++) { const o = ((y * k + j) * png.width + x * k + i) * 4; acc[0] += png.data[o]; acc[1] += png.data[o + 1]; acc[2] += png.data[o + 2]; }
-    const c = grade(acc.map(a => a / (k * k * 255)));
+    const c = grade(acc.map(a => a / (k * k * 255)), 'mage');
     const o = (y * size + x) * 4; out.data[o] = c[0] * 255; out.data[o + 1] = c[1] * 255; out.data[o + 2] = c[2] * 255; out.data[o + 3] = 255;
   }
   return PNG.sync.write(out);

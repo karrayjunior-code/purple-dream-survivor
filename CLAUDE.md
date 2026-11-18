@@ -42,11 +42,40 @@ Inspirada en la tendencia de TikTok de CGI de finales de los 90 / principios de 
 
 **Jefes:** gigantes surrealistas (Sol con Cara ✅ implementado, gigante de piedra con rayos), magos oscuros (uno que copia tus hechizos), criaturas enormes (árbol vivo, dragón low-poly) y el rey gnomo.
 
+## Guía visual (referencia para todo cambio gráfico)
+Sacada de capturas de la tendencia "old dark fantasy" (CGI de finales de los 90). Copiar el **estilo**, nunca personajes ni escenas concretas.
+
+**Paleta** (constante `PAL` en `index.html`):
+| Uso | Color | Código |
+|---|---|---|
+| Fondo / sombras | morado casi negro | `#1A0638` |
+| Base | morado intenso | `#7A1CFF` |
+| Luces mágicas | violeta | `#B04AFF` |
+| Rayos, venas, bordes de luz | azul eléctrico | `#1E5BFF` |
+| Agua / brillos fríos | cian | `#3EF0FF` |
+| Ácido, ojos, setas | verde ácido | `#8CFF1A` |
+| Túnicas, peligro | rojo sangre | `#B0001E` |
+| Sol, lava, fuego | naranja fuego | `#FF5A00` |
+| Ventanas, chispas | oro | `#FFB300` |
+
+**Reglas de estilo:**
+- Negros profundos teñidos de morado y mucho contraste; nada de grises neutros.
+- Nada de tonos de piel ni ropa "normales": pieles moradas, verdes ácido, lilas o en sombra total.
+- Superficies nunca lisas: textura moteada/ruidosa (piedra, escamas, tela vieja), aunque sea a baja resolución.
+- Brillos emisivos fuertes: ojos que brillan en todos los enemigos, venas de rayos azules sobre piedra oscura, lava naranja en el fuego, ventanas doradas.
+- Borde de luz (rim light) morado/azul en los personajes para separarlos del fondo.
+- Contraste de temperatura: fondo frío (morado/azul) con focos cálidos (naranja/oro) o tóxicos (verde ácido).
+- Elementos recurrentes: soles con cara, ojos flotantes, gigantes de piedra con venas eléctricas, encapuchados rojos con casco plateado y ojos verdes, suelos de ajedrez, galaxias en espiral, setas con puntos brillantes, agua cian luminosa.
+- Ambiente: sueño raro, inquietante más que terrorífico; viñeta oscura morada.
+
+**Implementación actual:** shader común de personajes (`charShader`: moteado, rim light, ojos con brillo, venas) y post-proceso final (saturación, contraste, sombras moradas, viñeta que respira, leve posterizado). El color de cada pieza va en `PAL`; los modelos KayKit se recolorean en `tools/prepare-models.mjs`.
+
 ## Estado actual
 - `index.html`: toda la demo en un solo archivo (HTML + CSS + JS).
 - `vendor/three.min.js`: Three.js r128 (sin dependencias de CDN). `vendor/GLTFLoader.js`: cargador glTF de r128 (minificado).
 - `models/`: mago, esqueleto y encapuchado de KayKit (CC0), recortados con `tools/prepare-models.mjs` (accesorios fuera, pocas animaciones, menos polígonos, recoloreados).
 - Goblin, ojo, gnomo y Sol con Cara están hechos por código con el mismo estilo (color por vértice + sombreado plano).
+- Todo se dibuja con la paleta de la Guía visual, shader de personaje y un post-proceso de color final.
 - Enemigos: sus animaciones (andar, golpe, morir) se hornean en fotogramas al cargar y se dibujan con InstancedMesh (pocas draw calls con 400 enemigos). El mago usa animaciones reales (correr, hechizo, golpe, morir).
 - Publicado con GitHub Pages: https://karrayjunior-code.github.io/purple-dream-survivor/
 - Implementado: 6 poderes, 5 pasivas, 6 tipos de enemigo, jefe Sol con Cara a los 2:30, joystick táctil, pausa, mejor tiempo guardado.

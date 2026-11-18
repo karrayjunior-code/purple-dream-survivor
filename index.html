@@ -119,6 +119,35 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x14062b);
 scene.fog = new THREE.Fog(0x24104a, 30, 72);
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 200);
+// Post-proceso ligero: se pinta la escena en una textura y un único pase la lleva a la paleta del juego
+const postRT = new THREE.WebGLRenderTarget(1, 1, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+const postMat = new THREE.ShaderMaterial({
+  uniforms: { tScene: { value: postRT.texture }, uTime: { value: 0 } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+  fragmentShader: `uniform sampler2D tScene; uniform float uTime; varying vec2 vUv;
+    void main() {
+      vec3 c = texture2D(tScene, vUv).rgb;
+      float l = dot(c, vec3(0.299, 0.587, 0.114));
+      c = mix(vec3(l), c, 1.45);                                                   // colores muy saturados
+      c = (c - 0.45) * 1.15 + 0.45;                                                // más contraste
+      c *= mix(vec3(0.7, 0.55, 1.2), vec3(1.08, 1.0, 0.9), smoothstep(0.05, 0.75, l)); // sombras moradas/azules, luces cálidas
+      c += vec3(0.045, 0.0, 0.085) * (1.0 - smoothstep(0.0, 0.35, l));              // negros teñidos de morado
+      vec2 d = (vUv - 0.5) * vec2(1.0, 1.2);
+      float vg = smoothstep(0.95, 0.25, length(d) + sin(uTime * 0.7) * 0.025);     // viñeta que "respira"
+      c *= mix(vec3(0.22, 0.03, 0.38), vec3(1.0), vg);
+      c = floor(c * 30.0 + 0.5) / 30.0;                                            // leve posterizado retro
+      gl_FragColor = vec4(c, 1.0);
+    }`,
+  depthTest: false, depthWrite: false,
+});
+const postScene = new THREE.Scene(), postCam = new THREE.Camera();
+{ const q = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat); q.frustumCulled = false; postScene.add(q); }
+const _dbs = new THREE.Vector2();
+function renderFrame(t) {
+  postMat.uniforms.uTime.value = t;
+  renderer.setRenderTarget(postRT); renderer.render(scene, camera);
+  renderer.setRenderTarget(null); renderer.render(postScene, postCam);
+}
 let portrait = false;
 function resize() {
   const w = innerWidth, h = innerHeight;
@@ -128,6 +157,7 @@ function resize() {
   portrait = w < h;
   camera.fov = portrait ? 58 : 50;
   camera.updateProjectionMatrix();
+  renderer.getDrawingBufferSize(_dbs); postRT.setSize(_dbs.x, _dbs.y);
 }
 addEventListener('resize', resize); resize();
 
@@ -255,7 +285,43 @@ scene.add(sparkles);
 
 // ---------- Personajes ----------
 // Todos comparten el mismo estilo: color por vértice + sombreado plano (proporciones y colores tipo KayKit, look retro).
-const charMat = new THREE.MeshPhongMaterial({ vertexColors: true, flatShading: true, shininess: 14, specular: 0x2a1a44 });
+// Shader común "old dark fantasy": textura moteada ruidosa, borde de luz morado/azul, ojos emisivos y venas brillantes.
+const NOISE_GLSL = `
+float h3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+float n3(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(h3(i), h3(i + vec3(1., 0., 0.)), f.x), mix(h3(i + vec3(0., 1., 0.)), h3(i + vec3(1., 1., 0.)), f.x), f.y),
+             mix(mix(h3(i + vec3(0., 0., 1.)), h3(i + vec3(1., 0., 1.)), f.x), mix(h3(i + vec3(0., 1., 1.)), h3(i + vec3(1., 1., 1.)), f.x), f.y), f.z); }`;
+function charShader(sh, o = {}) {
+  const inst = !o.mage;
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vRest; varying vec2 vFx;' + (inst ? '\nattribute vec3 rest; attribute vec2 fx;' : ''))
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + (inst ? 'vRest = rest; vFx = fx;' : 'vRest = position * ' + o.scale.toFixed(4) + '; vFx = vec2(0.0);'));
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vRest; varying vec2 vFx;' + NOISE_GLSL)
+    .replace('#include <color_fragment>', `#include <color_fragment>
+      ${o.mage ? STAR_GLSL : ''}
+      float mot = n3(vRest * 11.0) * 0.55 + n3(vRest * 29.0) * 0.45;
+      diffuseColor.rgb *= mix(1.0, 0.4 + 1.1 * mot, 1.0 - vFx.x);`)
+    .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      float rim = pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 2.4);
+      totalEmissiveRadiance += mix(vec3(0.1, 0.3, 1.0), vec3(0.75, 0.15, 1.0), clamp(normal.y * 0.5 + 0.5, 0.0, 1.0)) * rim * 1.1;
+      totalEmissiveRadiance += diffuseColor.rgb * vFx.x * 1.7;
+      if (vFx.y > 0.0) {
+        float vn = n3(vRest * VEIN_SCALE * 5.0) * 0.65 + n3(vRest * VEIN_SCALE * 12.0) * 0.35;
+        float vein = 1.0 - smoothstep(0.0, 0.06, abs(vn - 0.5));
+        totalEmissiveRadiance += VEIN_COLOR * vein * vFx.y;
+        diffuseColor.rgb *= 1.0 - vein * 0.5;
+      }`)
+    .replace('VEIN_COLOR', o.vein || 'vec3(0.35, 0.55, 1.6)').replace(/VEIN_SCALE/g, (o.veinScale || 1).toFixed(2));
+}
+const STAR_GLSL = `{ vec3 cc = diffuseColor.rgb; float mx = max(max(cc.r, cc.g), cc.b), mn = min(min(cc.r, cc.g), cc.b);
+  if (cc.b >= mx && cc.b > cc.r * 1.2 && mx < 0.65 && mx - mn > 0.1) {
+    diffuseColor.rgb = vec3(0.07, 0.06, 0.4) * (0.5 + mx * 1.4);
+    vec3 c = floor(vRest * 12.0); float h = fract(sin(dot(c, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+    if (h > 0.95) diffuseColor.rgb = h > 0.982 ? vec3(1.6, 1.35, 0.5) : vec3(1.25, 1.25, 1.6);
+  } }`;
+const charMat = new THREE.MeshPhongMaterial({ vertexColors: true, flatShading: true, shininess: 22, specular: 0x4a2a88 });
+charMat.onBeforeCompile = sh => charShader(sh);
 const CG = {
   sph: new THREE.SphereGeometry(1, 8, 5), ico: new THREE.IcosahedronGeometry(1, 2),
   cyl: new THREE.CylinderGeometry(1, 1, 1, 6, 1, true), cylT: new THREE.CylinderGeometry(0.75, 1, 1, 8), cone: new THREE.ConeGeometry(1, 1, 6),
@@ -270,21 +336,23 @@ const _v = new THREE.Vector3(), _c = new THREE.Color(), _q = new THREE.Quaternio
 const mtx = (x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = sx, sz = sx) => new THREE.Matrix4().compose(_p.set(x, y, z), _q.setFromEuler(_e.set(rx, ry, rz)), _s.set(sx, sy, sz));
 // Mini-rig: pila de transformaciones para montar personajes por piezas
 function Rig() {
-  const parts = [], st = [new THREE.Matrix4()];
+  const parts = [], st = [new THREE.Matrix4()]; let fx = [0, 0];
   return {
     parts,
+    fx(glow = 0, vein = 0) { fx = [glow, vein]; return this; },
     push(x, y, z, rx, ry, rz, sx, sy, sz) { st.push(st[st.length - 1].clone().multiply(mtx(x, y, z, rx, ry, rz, sx, sy, sz))); return this; },
     pop() { st.pop(); return this; },
-    add(geo, color, sx, sy, sz, x, y, z, rx, ry, rz, grad = 0.45) { parts.push({ geo, color, grad, m: st[st.length - 1].clone().multiply(mtx(x, y, z, rx, ry, rz, sx, sy, sz)) }); return this; },
+    add(geo, color, sx, sy, sz, x, y, z, rx, ry, rz, grad = 0.45) { parts.push({ geo, color, grad, fx, m: st[st.length - 1].clone().multiply(mtx(x, y, z, rx, ry, rz, sx, sy, sz)) }); return this; },
   };
 }
 // Une piezas en una sola geometría con color por vértice (degradado vertical, como la textura de KayKit)
 function mergeParts(parts) {
   let nv = 0, ni = 0;
   for (const p of parts) { nv += p.geo.attributes.position.count; ni += p.geo.index.count; }
-  const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3), idx = new (nv > 65535 ? Uint32Array : Uint16Array)(ni);
+  const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3), fx = new Float32Array(nv * 2), idx = new (nv > 65535 ? Uint32Array : Uint16Array)(ni);
   let vo = 0, io = 0;
   for (const p of parts) {
+    for (let i = 0; i < p.geo.attributes.position.count; i++) { fx[(vo + i) * 2] = p.fx[0]; fx[(vo + i) * 2 + 1] = p.fx[1]; }
     const a = p.geo.attributes.position, bb = p.geo.boundingBox, h = bb.max.y - bb.min.y || 1; _c.set(p.color);
     for (let i = 0; i < a.count; i++) {
       _v.fromBufferAttribute(a, i); const k = 1 - p.grad * 0.6 + p.grad * (_v.y - bb.min.y) / h;
@@ -296,6 +364,7 @@ function mergeParts(parts) {
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setIndex(new THREE.BufferAttribute(idx, 1));
+  g.setAttribute('fx', new THREE.BufferAttribute(fx, 2)); g.setAttribute('rest', g.attributes.position);
   return g;
 }
 // Parámetros de pose para andar / recibir golpe / morir (t de 0 a 1)
@@ -306,43 +375,45 @@ function poseOf(anim, t) {
   else { const k = Math.min(1, t * 1.25); o.fall = 1 - (1 - k) * (1 - k); o.up = 1.5 * o.fall; o.leg = 0.35 * o.fall; o.sq = 1 - 0.12 * o.fall; o.head = -0.45 * o.fall; }
   return o;
 }
+// Paleta del juego (ver "Guía visual" en CLAUDE.md)
+const PAL = { deep: 0x1a0638, purple: 0x7a1cff, violet: 0xb04aff, elec: 0x1e5bff, cyan: 0x3ef0ff, acid: 0x8cff1a, blood: 0xb0001e, fire: 0xff5a00, gold: 0xffb300 };
 const PROC = {
   goblin(R, anim, t) {
-    const o = poseOf(anim, t), SK = 0x52c42e, CL = 0x8a4a22, DK = 0x3b2410;
+    const o = poseOf(anim, t), SK = 0x2f9a0c, BELLY = 0x58d012, CL = 0x4a1288, DK = PAL.deep;
     R.push(0, o.bob, 0, o.lean - o.fall * 1.45);
     for (const s of [-1, 1]) { R.push(0.13 * s, 0.36, 0, o.leg * s); R.add(CG.cyl, SK, 0.085, 0.3, 0.085, 0, -0.15, 0); R.add(CG.box, DK, 0.16, 0.1, 0.25, 0, -0.32, 0.04, 0, 0, 0, 0.2); R.pop(); }
     R.push(0, 0.34, 0, 0, 0, 0, 1, o.sq, 1);
-    R.add(CG.sph, SK, 0.27, 0.26, 0.23, 0, 0.2, 0);
+    R.add(CG.sph, BELLY, 0.27, 0.26, 0.23, 0, 0.2, 0);
     R.add(CG.cylT, CL, 0.26, 0.14, 0.23, 0, 0.07, 0, 0, 0, 0, 0.25);
     for (const s of [-1, 1]) { R.push(0.26 * s, 0.36, 0, o.arm * s - o.up, 0, s * (0.3 + o.up * 0.5)); R.add(CG.cyl, SK, 0.07, 0.3, 0.07, 0, -0.15, 0); R.add(CG.sph, SK, 0.1, 0.1, 0.1, 0, -0.32, 0); R.pop(); }
     R.push(0, 0.5, 0.03, o.head);
     R.add(CG.sph, SK, 0.37, 0.32, 0.33, 0, 0.22, 0);
     for (const s of [-1, 1]) {
       R.add(CG.cone, SK, 0.1, 0.45, 0.06, 0.42 * s, 0.3, -0.02, 0, 0, -s * 1.2);
-      R.add(CG.sph, 0xfff04a, 0.1, 0.11, 0.06, 0.14 * s, 0.27, 0.28, 0, 0, 0, 0.1);
-      R.add(CG.sph, 0x140808, 0.045, 0.06, 0.03, 0.14 * s, 0.27, 0.33, 0, 0, 0, 0);
-      R.add(CG.box, 0x2a6018, 0.14, 0.04, 0.05, 0.14 * s, 0.4, 0.27, 0, 0, s * 0.3, 0);
+      R.fx(1).add(CG.sph, 0xffd000, 0.1, 0.11, 0.06, 0.14 * s, 0.27, 0.28, 0, 0, 0, 0.1);
+      R.fx(0).add(CG.sph, 0x0a0006, 0.025, 0.07, 0.03, 0.14 * s, 0.27, 0.33, 0, 0, 0, 0);
+      R.add(CG.box, 0x0f3a02, 0.16, 0.05, 0.05, 0.14 * s, 0.38, 0.28, 0, 0, s * 0.45, 0);
     }
-    R.add(CG.cone, 0x3f9a22, 0.07, 0.18, 0.07, 0, 0.18, 0.36, Math.PI / 2, 0, 0, 0.2);
-    R.add(CG.box, 0x2a0c08, 0.22, 0.05, 0.04, 0, 0.07, 0.3, 0, 0, 0, 0);
-    R.add(CG.cone, 0xffffff, 0.035, 0.07, 0.035, 0.07, 0.11, 0.32, 0, 0, 0, 0); R.add(CG.cone, 0xffffff, 0.035, 0.07, 0.035, -0.07, 0.11, 0.32, 0, 0, 0, 0);
+    R.add(CG.cone, 0x1f6a06, 0.07, 0.18, 0.07, 0, 0.18, 0.36, Math.PI / 2, 0, 0, 0.2);
+    R.add(CG.box, 0x1a0010, 0.22, 0.05, 0.04, 0, 0.07, 0.3, 0, 0, 0, 0);
+    R.add(CG.cone, 0xd8e8ff, 0.035, 0.07, 0.035, 0.07, 0.11, 0.32, 0, 0, 0, 0); R.add(CG.cone, 0xd8e8ff, 0.035, 0.07, 0.035, -0.07, 0.11, 0.32, 0, 0, 0, 0);
     R.pop(); R.pop(); R.pop();
   },
   gnome(R, anim, t) {
-    const o = poseOf(anim, t), SK = 0xf4b48a, BODY = 0x2f4ee0, BOOT = 0x6a3418, HAT = 0xe8203c, BEARD = 0xf6f2ff;
+    const o = poseOf(anim, t), SK = 0x9a5aff, BODY = PAL.elec, BOOT = 0x2a0650, HAT = PAL.blood, BEARD = 0xc8f4ff;
     R.push(0, o.bob, 0, o.lean - o.fall * 1.45);
-    for (const s of [-1, 1]) { R.push(0.12 * s, 0.26, 0, o.leg * s); R.add(CG.cyl, 0x1d2a80, 0.085, 0.2, 0.085, 0, -0.1, 0); R.add(CG.box, BOOT, 0.16, 0.1, 0.26, 0, -0.22, 0.04, 0, 0, 0, 0.2); R.pop(); }
+    for (const s of [-1, 1]) { R.push(0.12 * s, 0.26, 0, o.leg * s); R.add(CG.cyl, 0x10206a, 0.085, 0.2, 0.085, 0, -0.1, 0); R.add(CG.box, BOOT, 0.16, 0.1, 0.26, 0, -0.22, 0.04, 0, 0, 0, 0.2); R.pop(); }
     R.push(0, 0.24, 0, 0, 0, 0, 1, o.sq, 1);
     R.add(CG.sph, BODY, 0.3, 0.29, 0.27, 0, 0.2, 0);
-    R.add(CG.cylT, 0x2a1a10, 0.29, 0.06, 0.27, 0, 0.12, 0, 0, 0, 0, 0.1);
-    R.add(CG.box, 0xffd23a, 0.08, 0.06, 0.03, 0, 0.12, 0.27, 0, 0, 0, 0);
+    R.add(CG.cylT, PAL.deep, 0.29, 0.06, 0.27, 0, 0.12, 0, 0, 0, 0, 0.1);
+    R.fx(0.6).add(CG.box, PAL.gold, 0.08, 0.06, 0.03, 0, 0.12, 0.27, 0, 0, 0, 0).fx(0);
     for (const s of [-1, 1]) { R.push(0.27 * s, 0.32, 0, o.arm * s - o.up, 0, s * (0.3 + o.up * 0.5)); R.add(CG.cyl, BODY, 0.065, 0.26, 0.065, 0, -0.13, 0); R.add(CG.sph, SK, 0.085, 0.085, 0.085, 0, -0.28, 0); R.pop(); }
     R.push(0, 0.45, 0.02, o.head);
     R.add(CG.sph, SK, 0.3, 0.28, 0.28, 0, 0.2, 0);
     R.add(CG.cone, BEARD, 0.27, 0.42, 0.17, 0, -0.02, 0.17, Math.PI - 0.15, 0, 0, 0.3);
     R.add(CG.sph, BEARD, 0.2, 0.12, 0.1, 0, 0.12, 0.25, 0, 0, 0, 0.2);
-    R.add(CG.sph, 0xff6a80, 0.12, 0.11, 0.12, 0, 0.18, 0.3, 0, 0, 0, 0.25);
-    for (const s of [-1, 1]) { R.add(CG.sph, 0xffffff, 0.07, 0.08, 0.04, 0.11 * s, 0.28, 0.25, 0, 0, 0, 0.1); R.add(CG.sph, 0x101010, 0.035, 0.045, 0.03, 0.11 * s, 0.28, 0.28, 0, 0, 0, 0); }
+    R.add(CG.sph, 0xff1a7a, 0.12, 0.11, 0.12, 0, 0.18, 0.3, 0, 0, 0, 0.25);
+    for (const s of [-1, 1]) { R.fx(1).add(CG.sph, PAL.acid, 0.07, 0.08, 0.04, 0.11 * s, 0.28, 0.25, 0, 0, 0, 0.1); R.fx(0).add(CG.sph, 0x0a0006, 0.03, 0.045, 0.03, 0.11 * s, 0.28, 0.28, 0, 0, 0, 0); }
     R.add(CG.cylT, HAT, 0.31, 0.08, 0.31, 0, 0.36, -0.02, -0.12, 0, 0, 0.2);
     R.push(0, 0.38, -0.03, -0.18);
     R.add(CG.cone, HAT, 0.28, 0.6, 0.28, 0, 0.3, 0);
@@ -350,49 +421,50 @@ const PROC = {
     R.pop(); R.pop(); R.pop(); R.pop();
   },
   eye(R, anim, t) {
-    const o = poseOf(anim, t), FL = 0xf07a7a, WING = 0x6a2a9a;
+    const o = poseOf(anim, t), FL = 0x8a1ad0, WING = 0x2a0650;
     let y = 1.6, flap = Math.sin(o.p * 2) * 0.6, sway = Math.sin(o.p) * 0.35, lid = 0;
     if (anim === 'walk') y += Math.sin(o.p) * 0.12;
     if (anim === 'hit') { lid = Math.sin(t * Math.PI); flap = 0.9 * lid; }
     if (anim === 'die') { y = 1.6 - 1.2 * o.fall; lid = o.fall; flap = -0.8 * o.fall; sway = 0.6 * o.fall; }
     R.push(0, y, 0, o.lean * 0.6 - o.fall * 1.2, 0, 0, 1, o.sq, 1);
-    R.add(CG.sph, FL, 0.5, 0.46, 0.48, 0, 0, 0, 0, 0, 0, 0.6);
-    R.add(CG.sph, 0xfff6ee, 0.37, 0.32, 0.2, 0, 0, 0.35, 0, 0, 0, 0.2);
-    R.add(CG.sph, 0xffa21a, 0.18, 0.18, 0.07, 0, 0, 0.52, 0, 0, 0, 0.3);
-    R.add(CG.sph, 0x0a0410, 0.08, 0.08, 0.04, 0, 0, 0.58, 0, 0, 0, 0);
-    R.add(CG.half, FL, 0.4, 0.2 + lid * 0.2, 0.3, 0, 0.12 - lid * 0.1, 0.3, 0.5 - lid * 0.4, 0, 0, 0.3);
+    R.fx(0, 1).add(CG.sph, FL, 0.5, 0.46, 0.48, 0, 0, 0, 0, 0, 0, 0.6);
+    R.fx(0.25, 0).add(CG.sph, 0xf0d0ff, 0.37, 0.32, 0.2, 0, 0, 0.35, 0, 0, 0, 0.2);
+    R.fx(1).add(CG.sph, PAL.fire, 0.18, 0.18, 0.07, 0, 0, 0.52, 0, 0, 0, 0.3);
+    R.fx(0).add(CG.sph, 0x0a0006, 0.08, 0.08, 0.04, 0, 0, 0.58, 0, 0, 0, 0);
+    R.fx(0, 1).add(CG.half, FL, 0.4, 0.2 + lid * 0.2, 0.3, 0, 0.12 - lid * 0.1, 0.3, 0.5 - lid * 0.4, 0, 0, 0.3).fx(0);
     for (const s of [-1, 1]) { R.push(0.42 * s, 0.1, -0.05, 0, 0, s * (0.35 + flap)); R.add(CG.box, WING, 0.55, 0.035, 0.3, s * 0.3, 0, 0, 0, 0, 0, 0.2); R.add(CG.cone, WING, 0.08, 0.28, 0.06, s * 0.62, -0.08, 0, 0, 0, Math.PI, 0.2); R.pop(); }
     for (let i = 0; i < 3; i++) {
       const a = (i - 1) * 0.28, sw = Math.sin(o.p + i * 2.1) * 0.35 + sway * 0.4;
       R.push(a * 0.9, -0.38, -0.05 + Math.abs(a) * 0.2, sw, 0, a);
-      R.add(CG.cyl, 0xc04a66, 0.06, 0.3, 0.06, 0, -0.14, 0); R.push(0, -0.28, 0, sw * 0.8); R.add(CG.cyl, 0xa03a58, 0.045, 0.26, 0.045, 0, -0.12, 0); R.pop();
+      R.add(CG.cyl, PAL.blood, 0.06, 0.3, 0.06, 0, -0.14, 0); R.push(0, -0.28, 0, sw * 0.8); R.add(CG.cyl, 0x70083a, 0.045, 0.26, 0.045, 0, -0.12, 0); R.pop();
       R.pop();
     }
     R.pop();
   },
 };
-// Jefe Sol con Cara (modelo único, no instanciado)
+// Jefe Sol con Cara (modelo único, no instanciado): piedra de fuego con venas de lava y ojos brillantes
 const bossMat = charMat.clone();
+bossMat.onBeforeCompile = sh => charShader(sh, { vein: 'vec3(2.2, 1.1, 0.15)', veinScale: 0.4 });
 function buildBoss() {
   const g = new THREE.Group(), h = new THREE.Group(); h.position.y = 3.4; g.add(h); g.userData.float = h; g.userData.fy = 3.4;
   let R = Rig();
-  R.add(CG.ico, 0xff7414, 2.1, 2.1, 1.75, 0, 0, 0, 0, 0, 0, 0.6);
+  R.fx(0, 1).add(CG.ico, 0xe83a00, 2.1, 2.1, 1.75, 0, 0, 0, 0, 0, 0, 0.6).fx(0);
   for (const s of [-1, 1]) {
-    R.add(CG.sph, 0xff3a6a, 0.45, 0.3, 0.15, 1.15 * s, -0.4, 1.32, 0, 0, 0, 0.2);
-    R.add(CG.sph, 0xffffff, 0.55, 0.45, 0.22, 0.72 * s, 0.45, 1.55, 0, 0, 0, 0.2);
-    R.add(CG.sph, 0x140404, 0.22, 0.26, 0.1, 0.66 * s, 0.4, 1.74, 0, 0, 0, 0);
-    R.add(CG.sph, 0xffffff, 0.07, 0.07, 0.04, 0.6 * s, 0.5, 1.83, 0, 0, 0, 0);
-    R.add(CG.box, 0xa83000, 0.7, 0.14, 0.18, 0.75 * s, 1.0, 1.45, 0, 0, s * 0.28, 0.2);
+    R.add(CG.sph, PAL.blood, 0.45, 0.3, 0.15, 1.15 * s, -0.4, 1.32, 0, 0, 0, 0.2);
+    R.fx(0.7).add(CG.sph, 0xffe0a0, 0.55, 0.45, 0.22, 0.72 * s, 0.45, 1.55, 0, 0, 0, 0.2);
+    R.fx(0).add(CG.sph, 0x0a0004, 0.22, 0.26, 0.1, 0.66 * s, 0.4, 1.74, 0, 0, 0, 0);
+    R.add(CG.half, 0xc02a00, 0.6, 0.38, 0.3, 0.72 * s, 0.47, 1.52, 0.35, 0, 0, 0.3);
+    R.add(CG.box, 0x4a0600, 0.7, 0.14, 0.18, 0.75 * s, 1.0, 1.45, 0, 0, s * 0.28, 0.2);
   }
-  R.add(CG.sph, 0xff8a2a, 0.3, 0.38, 0.32, 0, 0.0, 1.6, 0, 0, 0, 0.4);
+  R.add(CG.sph, 0xff4a10, 0.3, 0.38, 0.32, 0, 0.0, 1.6, 0, 0, 0, 0.4);
   h.add(new THREE.Mesh(mergeParts(R.parts), bossMat));
   R = Rig();
-  for (let i = 0; i < 14; i++) { const a = i / 14 * TAU, l = i % 2 ? 1.25 : 1.7; R.add(CG.cone, i % 2 ? 0xffd21a : 0xffa21a, 0.42, l, 0.22, Math.cos(a) * (2.0 + l / 2), Math.sin(a) * (2.0 + l / 2), -0.25, 0, 0, a - Math.PI / 2, 0.5); }
+  for (let i = 0; i < 14; i++) { const a = i / 14 * TAU, l = i % 2 ? 1.25 : 1.7; R.fx(0.55, 1).add(CG.cone, i % 2 ? PAL.gold : PAL.fire, 0.42, l, 0.22, Math.cos(a) * (2.0 + l / 2), Math.sin(a) * (2.0 + l / 2), -0.25, 0, 0, a - Math.PI / 2, 0.5); }
   const rays = new THREE.Mesh(mergeParts(R.parts), bossMat); h.add(rays); g.userData.rays = rays;
   R = Rig();
-  R.add(CG.sph, 0x4a0010, 0.72, 0.42, 0.2, 0, 0, 0, 0, 0, 0, 0.2);
-  R.add(CG.sph, 0xff4a7a, 0.4, 0.16, 0.1, 0, -0.18, 0.08, 0, 0, 0, 0.2);
-  R.add(CG.box, 0xffffff, 0.8, 0.1, 0.12, 0, 0.3, 0.05, 0, 0, 0, 0);
+  R.add(CG.sph, 0x2a0010, 0.72, 0.42, 0.2, 0, 0, 0, 0, 0, 0, 0.2);
+  R.add(CG.sph, 0xd0102a, 0.4, 0.16, 0.1, 0, -0.18, 0.08, 0, 0, 0, 0.2);
+  R.add(CG.box, 0xffe8c0, 0.8, 0.1, 0.12, 0, 0.3, 0.05, 0, 0, 0, 0);
   const mouth = new THREE.Mesh(mergeParts(R.parts), bossMat); mouth.position.set(0, -0.8, 1.6); h.add(mouth); g.userData.mouth = mouth;
   return g;
 }
@@ -429,7 +501,8 @@ const PLAN = { walk: 10, hit: 4, die: 8 };
 const GFX = {}, corpses = [], dying = [];
 const frameT = (anim, f, n) => anim === 'walk' ? f / n : anim === 'hit' ? (f + 0.5) / n : f / (n - 1);
 function registerType(rk, frames) {
-  const T = {};
+  const T = {}, rest = frames.walk[0].attributes.position;
+  for (const anim in frames) for (const g of frames[anim]) g.setAttribute('rest', rest);
   for (const anim in frames) T[anim] = frames[anim].map(geo => {
     const cap = anim === 'walk' ? INST_CAP : 300, im = new THREE.InstancedMesh(geo, charMat, cap);
     for (let i = 0; i < cap; i++) im.setColorAt(i, _c.setScalar(1));
@@ -443,10 +516,26 @@ function bakeProc(build) {
   for (const anim in PLAN) { out[anim] = []; for (let f = 0; f < PLAN[anim]; f++) { const R = Rig(); build(R, anim, frameT(anim, f, PLAN[anim])); out[anim].push(mergeParts(R.parts)); } }
   return out;
 }
-// Hornea un modelo glTF con esqueleto (KayKit) a fotogramas fijos
-function bakeGltf(gltf, height) {
+// Hornea un modelo glTF con esqueleto (KayKit) a fotogramas fijos.
+// opt.eyes: añade ojos brillantes pegados al hueso de la cabeza; opt.vein(r,g,b): qué vértices llevan venas.
+const EYE_MARK = [160 / 255, 1, 32 / 255];   // color marcador de ojos emisivos (lo pone tools/prepare-models.mjs)
+function bakeGltf(gltf, height, opt = {}) {
   const root = gltf.scene, mixer = new THREE.AnimationMixer(root), skinned = [];
   root.traverse(o => { if (o.isSkinnedMesh) skinned.push(o); });
+  // atributos fijos por vértice: color y efectos (brillo, venas)
+  const base = skinned.map(m => {
+    const c = m.geometry.attributes.color, n = c.count, col = new Float32Array(n * 3), fx = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      const r = c.getX(i), g = c.getY(i), b = c.getZ(i);
+      col[i * 3] = r; col[i * 3 + 1] = g; col[i * 3 + 2] = b;
+      if (Math.abs(r - EYE_MARK[0]) + Math.abs(g - EYE_MARK[1]) + Math.abs(b - EYE_MARK[2]) < 0.08) fx[i * 2] = 1;
+      else if (opt.vein && opt.vein(r, g, b)) fx[i * 2 + 1] = 1;
+    }
+    return { col, fx, idx: m.geometry.index.array };
+  });
+  let head = null, eyeL = null, eyeR = null;
+  if (opt.eyes) root.traverse(o => { if (o.isBone && o.name === 'head') head = o; });
+  const eyeGeo = CG.sph, eyeN = eyeGeo.attributes.position.count;
   const raw = {};
   for (const anim in PLAN) {
     const clip = gltf.animations.find(a => a.name === anim), n = PLAN[anim];
@@ -455,11 +544,30 @@ function bakeGltf(gltf, height) {
     act.play(); raw[anim] = [];
     for (let f = 0; f < n; f++) {
       mixer.setTime(frameT(anim, f, n) * clip.duration * (anim === 'walk' ? 1 : 0.999)); root.updateMatrixWorld(true);
-      raw[anim].push(skinned.map(m => {
+      const parts = skinned.map((m, k) => {
         const a = m.geometry.attributes.position, pos = new Float32Array(a.count * 3);
         for (let i = 0; i < a.count; i++) { m.boneTransform(i, _v); _v.applyMatrix4(m.matrixWorld); pos[i * 3] = _v.x; pos[i * 3 + 1] = _v.y; pos[i * 3 + 2] = _v.z; }
-        return { pos, col: m.geometry.attributes.color, idx: m.geometry.index.array };
-      }));
+        return Object.assign({ pos }, base[k]);
+      });
+      if (head) {
+        if (!eyeL) {   // primera vez: sitúa los ojos en la cara de la malla de cabeza y los fija al hueso
+          const hm = skinned.findIndex(m => /head/i.test(m.name)), p = parts[hm].pos, bb = new THREE.Box3();
+          for (let i = 0; i < p.length; i += 3) bb.expandByPoint(_v.set(p[i], p[i + 1], p[i + 2]));
+          const sz = bb.getSize(new THREE.Vector3()), inv = head.matrixWorld.clone().invert(), e = opt.eyes;
+          const at = sx => new THREE.Vector3(bb.min.x + sz.x * (0.5 + sx * e.x), bb.min.y + sz.y * e.y, bb.max.z - sz.z * e.z).applyMatrix4(inv);
+          eyeL = at(-1); eyeR = at(1); opt.eyeR = sz.x * e.r;
+        }
+        for (const ep of [eyeL, eyeR]) {
+          const c = _v.copy(ep).applyMatrix4(head.matrixWorld), pos = new Float32Array(eyeN * 3), col = new Float32Array(eyeN * 3), fx = new Float32Array(eyeN * 2);
+          const ea = eyeGeo.attributes.position; _c.set(opt.eyes.color);
+          for (let i = 0; i < eyeN; i++) {
+            pos[i * 3] = c.x + ea.getX(i) * opt.eyeR; pos[i * 3 + 1] = c.y + ea.getY(i) * opt.eyeR * 0.7; pos[i * 3 + 2] = c.z + ea.getZ(i) * opt.eyeR * 0.6;
+            col[i * 3] = _c.r; col[i * 3 + 1] = _c.g; col[i * 3 + 2] = _c.b; fx[i * 2] = 1;
+          }
+          parts.push({ pos, col, fx, idx: eyeGeo.index.array });
+        }
+      }
+      raw[anim].push(parts);
     }
   }
   let minY = Infinity, maxY = -Infinity;
@@ -467,16 +575,18 @@ function bakeGltf(gltf, height) {
   const k = height / (maxY - minY), out = {};
   for (const anim in raw) out[anim] = raw[anim].map(parts => {
     let nv = 0, ni = 0; for (const p of parts) { nv += p.pos.length / 3; ni += p.idx.length; }
-    const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3), idx = new (nv > 65535 ? Uint32Array : Uint16Array)(ni);
+    const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3), fx = new Float32Array(nv * 2), idx = new (nv > 65535 ? Uint32Array : Uint16Array)(ni);
     let vo = 0, io = 0;
     for (const p of parts) {
       const n = p.pos.length / 3;
-      for (let i = 0; i < n; i++) { pos[(vo + i) * 3] = p.pos[i * 3] * k; pos[(vo + i) * 3 + 1] = (p.pos[i * 3 + 1] - minY) * k; pos[(vo + i) * 3 + 2] = p.pos[i * 3 + 2] * k; col[(vo + i) * 3] = p.col.getX(i); col[(vo + i) * 3 + 1] = p.col.getY(i); col[(vo + i) * 3 + 2] = p.col.getZ(i); }
+      for (let i = 0; i < n; i++) { pos[(vo + i) * 3] = p.pos[i * 3] * k; pos[(vo + i) * 3 + 1] = (p.pos[i * 3 + 1] - minY) * k; pos[(vo + i) * 3 + 2] = p.pos[i * 3 + 2] * k; }
+      col.set(p.col, vo * 3); fx.set(p.fx, vo * 2);
       for (let i = 0; i < p.idx.length; i++) idx[io + i] = p.idx[i] + vo;
       vo += n; io += p.idx.length;
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setIndex(new THREE.BufferAttribute(idx, 1));
+    g.setAttribute('fx', new THREE.BufferAttribute(fx, 2));
     return g;
   });
   return out;
@@ -517,23 +627,13 @@ function updateCorpses(dt) {
 
 // ---------- Mago (modelo KayKit animado) ----------
 const mage = { mixer: null, A: {}, upper: null, uw: 0, rw: 0, castCd: 0, dead: false };
-function starShader(sh) {
-  sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvSP = position;');
-  sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vSP;').replace('#include <map_fragment>', `#include <map_fragment>
-    { vec3 cc = diffuseColor.rgb; float mx = max(max(cc.r, cc.g), cc.b), mn = min(min(cc.r, cc.g), cc.b);
-      if (cc.b >= mx && cc.b > cc.r * 1.2 && mx < 0.65 && mx - mn > 0.1) {
-        diffuseColor.rgb = vec3(0.07, 0.08, 0.38) * (0.5 + mx * 1.4);
-        vec3 c = floor(vSP * STAR_DENSITY); float h = fract(sin(dot(c, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
-        if (h > 0.95) diffuseColor.rgb = h > 0.982 ? vec3(1.6, 1.35, 0.5) : vec3(1.25, 1.25, 1.6);
-      } }`);
-}
 function setupMage(gltf) {
   const m = gltf.scene; m.updateMatrixWorld(true);
   const bb = new THREE.Box3().setFromObject(m), s = 2.8 / (bb.max.y - bb.min.y);
   m.scale.setScalar(s); m.position.y = -bb.min.y * s;
   let tex = null; m.traverse(o => { if (o.isMesh && o.material.map) tex = o.material.map; });
   tex.magFilter = tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.encoding = THREE.LinearEncoding; tex.needsUpdate = true;
-  const mk = skinning => { const mt = new THREE.MeshPhongMaterial({ map: tex, flatShading: true, skinning, shininess: 14, specular: 0x2a1a44 }); mt.onBeforeCompile = sh => { starShader(sh); sh.fragmentShader = sh.fragmentShader.replace('STAR_DENSITY', (12 * s).toFixed(3)); }; return mt; };
+  const mk = skinning => { const mt = new THREE.MeshPhongMaterial({ map: tex, flatShading: true, skinning, shininess: 22, specular: 0x4a2a88 }); mt.onBeforeCompile = sh => charShader(sh, { mage: true, scale: s }); return mt; };
   const mS = mk(true), mR = mk(false);
   m.traverse(o => { if (o.isMesh) { o.material = o.isSkinnedMesh ? mS : mR; o.frustumCulled = false; } });
   player.add(m);
@@ -927,8 +1027,8 @@ $('resumeBtn').onclick = togglePause;
   btn.disabled = true; btn.textContent = 'Cargando…';
   Promise.all(['models/mago.glb', 'models/esqueleto.glb', 'models/encapuchado.glb'].map(load)).then(([mg, sk, ho]) => {
     setupMage(mg);
-    registerType('skeleton', bakeGltf(sk, 1.9));
-    registerType('hooded', bakeGltf(ho, 2.2));
+    registerType('skeleton', bakeGltf(sk, 1.9, { vein: (r, g, b) => b > 0.6 && b > r * 1.1 }));   // huesos de piedra con venas eléctricas
+    registerType('hooded', bakeGltf(ho, 2.2, { eyes: { x: 0.17, y: 0.42, z: 0.22, r: 0.11, color: PAL.acid } }));
     btn.disabled = false; btn.textContent = txt;
   }).catch(err => { console.error(err); btn.textContent = 'Error al cargar'; });
 }
@@ -1102,7 +1202,7 @@ function loop(now) {
   camera.position.lerp(new THREE.Vector3(P.pos.x + camOff.x, camOff.y, P.pos.z + camOff.z), state === 'start' ? 1 : Math.min(1, dt * 8));
   camera.lookAt(P.pos.x, 0.5, P.pos.z);
   renderEnemies();
-  renderer.render(scene, camera);
+  renderFrame(now / 1000);
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
