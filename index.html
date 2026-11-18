@@ -116,7 +116,7 @@ const canvas = $('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x14062b);
-scene.fog = new THREE.Fog(0x24104a, 20, 48);
+scene.fog = new THREE.Fog(0x24104a, 30, 72);
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 200);
 let portrait = false;
 function resize() {
@@ -246,8 +246,8 @@ function decor() {
 decor();
 
 // Partículas flotantes
-const SPN = 260, spPos = new Float32Array(SPN * 3);
-for (let i = 0; i < SPN; i++) { spPos[i * 3] = rand(-30, 30); spPos[i * 3 + 1] = rand(0.3, 7); spPos[i * 3 + 2] = rand(-30, 30); }
+const SPN = 400, spPos = new Float32Array(SPN * 3);
+for (let i = 0; i < SPN; i++) { spPos[i * 3] = rand(-45, 45); spPos[i * 3 + 1] = rand(0.3, 7); spPos[i * 3 + 2] = rand(-45, 45); }
 const spGeo = new THREE.BufferGeometry(); spGeo.setAttribute('position', new THREE.BufferAttribute(spPos, 3));
 const sparkles = new THREE.Points(spGeo, new THREE.PointsMaterial({ size: 0.2, color: 0xc9b5ff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }));
 scene.add(sparkles);
@@ -336,12 +336,13 @@ const B = {
 B.minignome = B.gnome;
 
 const ETYPES = {
-  goblin:    { hp: 6,   speed: 4.2, dmg: 6,  r: 0.5,  xp: 1, sc: 1,    color: 0x55ff55 },
-  eye:       { hp: 10,  speed: 3.2, dmg: 7,  r: 0.6,  xp: 2, sc: 1,    color: 0xff8888 },
-  gnome:     { hp: 12,  speed: 3.0, dmg: 7,  r: 0.5,  xp: 2, sc: 1,    color: 0x6688ff, split: true },
-  minignome: { hp: 4,   speed: 4.8, dmg: 4,  r: 0.35, xp: 1, sc: 0.55, color: 0x6688ff },
-  skeleton:  { hp: 24,  speed: 2.0, dmg: 10, r: 0.55, xp: 3, sc: 1,    color: 0xeeeedd },
-  hooded:    { hp: 16,  speed: 2.6, dmg: 8,  r: 0.55, xp: 3, sc: 1,    color: 0xff3333, shoots: true },
+  // Tamaño y radio al 60%, velocidad ~62%, daño por contacto ~50% respecto a la versión anterior
+  goblin:    { hp: 6,   speed: 2.6, dmg: 3,  r: 0.3,  xp: 1, sc: 0.6,  color: 0x55ff55 },
+  eye:       { hp: 10,  speed: 2.0, dmg: 4,  r: 0.36, xp: 2, sc: 0.6,  color: 0xff8888 },
+  gnome:     { hp: 12,  speed: 1.85, dmg: 4, r: 0.3,  xp: 2, sc: 0.6,  color: 0x6688ff, split: true },
+  minignome: { hp: 4,   speed: 3.0, dmg: 2,  r: 0.21, xp: 1, sc: 0.33, color: 0x6688ff },
+  skeleton:  { hp: 24,  speed: 1.25, dmg: 5, r: 0.33, xp: 3, sc: 0.6,  color: 0xeeeedd },
+  hooded:    { hp: 16,  speed: 1.6, dmg: 4,  r: 0.33, xp: 3, sc: 0.6,  color: 0xff3333, shoots: true },
   boss:      { hp: 900, speed: 1.7, dmg: 25, r: 2.6,  xp: 0, sc: 1,    color: 0xffaa33, boss: true },
 };
 const WAVES = [
@@ -351,6 +352,38 @@ const WAVES = [
   { t: 80, type: 'skeleton', w: 2, msg: '💀 Los esqueletos despiertan…' },
   { t: 110, type: 'hooded', w: 1.5, msg: '🔴 Los encapuchados rojos se acercan…' },
 ];
+
+// ---------- Enemigos instanciados (una draw call por pieza y tipo, no por enemigo) ----------
+const MAX_ENEMIES = 400, INST_CAP = 560;
+const hatMat = mat(0xffffff), hatColors = M.hats.map(m => m.color.clone());
+const RENDER = {};
+for (const type of ['goblin', 'skeleton', 'eye', 'hooded', 'gnome']) {
+  const proto = B[type](); proto.updateMatrixWorld(true);
+  const parts = [];
+  proto.traverse(o => {
+    if (!o.isMesh) return;
+    const hat = M.hats.includes(o.material);
+    const im = new THREE.InstancedMesh(o.geometry, hat ? hatMat : o.material, INST_CAP);
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); im.frustumCulled = false; im.count = 0;
+    if (hat) for (let i = 0; i < INST_CAP; i++) im.setColorAt(i, hatColors[i % hatColors.length]);
+    scene.add(im); parts.push({ im, local: o.matrixWorld.clone(), hat });
+  });
+  RENDER[type] = { parts, n: 0, float: !!proto.userData.float };
+}
+const _im = new THREE.Matrix4(), _ib = new THREE.Matrix4(), _it = new THREE.Matrix4();
+function renderEnemies() {
+  for (const k in RENDER) RENDER[k].n = 0;
+  for (const e of enemies) {
+    if (e.dead || !e.rk) continue;
+    const R = RENDER[e.rk]; if (R.n >= INST_CAP) continue;
+    const g = e.g; g.updateMatrix(); _ib.copy(g.matrix);
+    if (e.fly) _ib.multiply(_it.makeTranslation(0, e.fly, 0));
+    for (const p of R.parts) { _im.multiplyMatrices(_ib, p.local); p.im.setMatrixAt(R.n, _im); if (p.hat) p.im.setColorAt(R.n, hatColors[e.hat]); }
+    R.n++;
+  }
+  for (const k in RENDER) for (const p of RENDER[k].parts) { p.im.count = RENDER[k].n; p.im.instanceMatrix.needsUpdate = true; if (p.hat) p.im.instanceColor.needsUpdate = true; }
+}
+const spawnDist = () => portrait ? 45 : 39;
 
 // ---------- Poderes ----------
 const POWERS = {
@@ -395,11 +428,12 @@ function reset() {
 // ---------- Utilidades de combate ----------
 function spawnEnemy(type, x, z) {
   const def = ETYPES[type];
-  const g = B[type](); g.scale.setScalar(def.sc);
-  if (x === undefined) { const a = rand(0, TAU), d = portrait ? 30 : 26; x = P.pos.x + Math.cos(a) * d; z = P.pos.z + Math.sin(a) * d; }
-  g.position.set(x, 0, z); scene.add(g);
+  const rk = def.boss ? null : (type === 'minignome' ? 'gnome' : type);
+  const g = rk ? new THREE.Object3D() : B[type](); g.scale.setScalar(def.sc);
+  if (x === undefined) { const a = rand(0, TAU), d = spawnDist(); x = P.pos.x + Math.cos(a) * d; z = P.pos.z + Math.sin(a) * d; }
+  g.position.set(x, 0, z); if (!rk) scene.add(g);
   const hpMul = def.boss ? (1 + bossCount * 0.6) : 1 + time / 60 * 0.45;
-  const e = { type, def, g, hp: def.hp * hpMul, maxHp: def.hp * hpMul, r: def.r, speed: def.speed * rand(0.9, 1.1), dmg: def.dmg, hitT: 0, moonCd: 0, slow: 0, shootT: rand(1.5, 3.5), ph: rand(0, TAU), sc: def.sc, dead: false };
+  const e = { type, def, g, hp: def.hp * hpMul, maxHp: def.hp * hpMul, r: def.r, speed: def.speed * rand(0.9, 1.1), dmg: def.dmg, hitT: 0, moonCd: 0, slow: 0, shootT: rand(1.5, 3.5), ph: rand(0, TAU), sc: def.sc, dead: false, rk, fly: 0, hat: (Math.random() * hatColors.length) | 0 };
   enemies.push(e); return e;
 }
 function chooseType() {
@@ -443,7 +477,7 @@ function enemiesNear(x, z, r) {
 }
 function hurtArea(x, z, r, dmg) { for (const e of enemiesNear(x, z, r + 0.3)) hurt(e, dmg); }
 function damagePlayer(d) {
-  P.hp -= d; P.inv = 0.5;
+  P.hp -= d; P.inv = 0.85;
   const f = $('dmgflash'); f.style.transition = 'none'; f.style.opacity = 1; requestAnimationFrame(() => { f.style.transition = 'opacity .35s'; f.style.opacity = 0; });
 }
 
@@ -728,9 +762,11 @@ function update(dt) {
   // Aparición de enemigos
   spawnT -= dt;
   if (spawnT <= 0) {
-    const n = 1 + Math.floor(time / 45);
-    for (let i = 0; i < n && enemies.length < 150; i++) spawnEnemy(chooseType());
-    spawnT = Math.max(0.22, 1.15 - time * 0.006);
+    // Grupos que crecen con el tiempo; el tope de enemigos vivos sube poco a poco hasta 400
+    const cap = Math.min(MAX_ENEMIES, 40 + time), n = 2 + Math.floor(time / 30);
+    const a = rand(0, TAU), d = spawnDist(), cx = P.pos.x + Math.cos(a) * d, cz = P.pos.z + Math.sin(a) * d, spr = 1.5 + n * 0.3;
+    for (let i = 0; i < n && enemies.length < cap; i++) spawnEnemy(chooseType(), cx + rand(-spr, spr), cz + rand(-spr, spr));
+    spawnT = Math.max(0.45, 1.6 - time * 0.005);
   }
   if (!boss && time >= nextBoss) spawnBoss();
 
@@ -738,12 +774,13 @@ function update(dt) {
   for (const e of enemies) {
     if (e.dead) continue;
     const g = e.g, dx = P.pos.x - g.position.x, dz = P.pos.z - g.position.z, d = Math.hypot(dx, dz) || 0.001;
-    if (d > 44 && !e.def.boss) { const a = rand(0, TAU), r = portrait ? 30 : 26; g.position.set(P.pos.x + Math.cos(a) * r, 0, P.pos.z + Math.sin(a) * r); continue; }
+    if (d > 66 && !e.def.boss) { const a = rand(0, TAU), r = spawnDist(); g.position.set(P.pos.x + Math.cos(a) * r, 0, P.pos.z + Math.sin(a) * r); continue; }
     e.slow -= dt; e.moonCd -= dt;
     const s = e.speed * (e.slow > 0 ? 0.55 : 1);
     g.position.x += dx / d * s * dt; g.position.z += dz / d * s * dt;
     g.rotation.y = Math.atan2(dx, dz);
-    if (g.userData.float) g.userData.float.position.y = g.userData.fy + Math.sin(time * 3 + e.ph) * 0.25;
+    if (e.def.boss) g.userData.float.position.y = g.userData.fy + Math.sin(time * 3 + e.ph) * 0.25;
+    else if (RENDER[e.rk].float) e.fly = Math.sin(time * 3 + e.ph) * 0.25;
     else g.rotation.z = Math.sin(time * 10 + e.ph) * 0.08;
     if (e.hitT > 0) { e.hitT -= dt; g.scale.setScalar(e.sc * (1 + e.hitT * 2)); } else g.scale.setScalar(e.sc);
     if (d < e.r + 0.5 && P.inv <= 0) damagePlayer(e.dmg);
@@ -756,13 +793,22 @@ function update(dt) {
       $('bossfill').style.width = Math.max(0, e.hp / e.maxHp * 100) + '%';
     }
   }
-  // Separación para que no se amontonen
+  // Separación para que no se amontonen (rejilla espacial: evita comparar todos con todos)
+  sepGrid.clear();
   for (let i = 0; i < enemies.length; i++) {
-    const a = enemies[i]; if (a.dead || a.def.boss) continue;
-    for (let j = i + 1; j < enemies.length; j++) {
-      const b = enemies[j]; if (b.dead || b.def.boss) continue;
-      const dx = b.g.position.x - a.g.position.x, dz = b.g.position.z - a.g.position.z, min = (a.r + b.r) * 0.9, d2 = dx * dx + dz * dz;
-      if (d2 < min * min && d2 > 0.0001) { const d = Math.sqrt(d2), push = (min - d) * 0.5; a.g.position.x -= dx / d * push; a.g.position.z -= dz / d * push; b.g.position.x += dx / d * push; b.g.position.z += dz / d * push; }
+    const e = enemies[i]; if (e.dead || e.def.boss) continue;
+    e.ci = i; e.cx = Math.floor(e.g.position.x); e.cz = Math.floor(e.g.position.z);
+    const k = e.cx * 4096 + e.cz; let c = sepGrid.get(k); if (!c) { c = []; sepGrid.set(k, c); } c.push(e);
+  }
+  for (const a of enemies) {
+    if (a.dead || a.def.boss) continue;
+    for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
+      const c = sepGrid.get((a.cx + ox) * 4096 + a.cz + oz); if (!c) continue;
+      for (const b of c) {
+        if (b.ci <= a.ci) continue;
+        const dx = b.g.position.x - a.g.position.x, dz = b.g.position.z - a.g.position.z, min = (a.r + b.r) * 0.9, d2 = dx * dx + dz * dz;
+        if (d2 < min * min && d2 > 0.0001) { const d = Math.sqrt(d2), push = (min - d) * 0.5; a.g.position.x -= dx / d * push; a.g.position.z -= dz / d * push; b.g.position.x += dx / d * push; b.g.position.z += dz / d * push; }
+      }
     }
   }
 
@@ -816,8 +862,8 @@ function updateFx(dt) {
   for (let i = 0; i < SPN; i++) {
     let x = spPos[i * 3], z = spPos[i * 3 + 2];
     spPos[i * 3 + 1] += Math.sin(time + i) * dt * 0.3;
-    if (x - P.pos.x > 30) x -= 60; else if (x - P.pos.x < -30) x += 60;
-    if (z - P.pos.z > 30) z -= 60; else if (z - P.pos.z < -30) z += 60;
+    if (x - P.pos.x > 45) x -= 90; else if (x - P.pos.x < -45) x += 90;
+    if (z - P.pos.z > 45) z -= 90; else if (z - P.pos.z < -45) z += 90;
     spPos[i * 3] = x; spPos[i * 3 + 2] = z;
   }
   spGeo.attributes.position.needsUpdate = true;
@@ -829,7 +875,7 @@ function updateHud() {
   $('lvl').textContent = P.lvl; $('kills').textContent = P.kills; $('timer').textContent = fmt(time);
 }
 
-const camOff = new THREE.Vector3();
+const camOff = new THREE.Vector3(), sepGrid = new Map();
 let last = performance.now();
 reset();
 function loop(now) {
@@ -838,9 +884,10 @@ function loop(now) {
   if (state === 'play' || state === 'start') updateFx(dt);
   if (state === 'start') { P.pos.x += dt * 1.2; P.pos.z -= dt * 0.6; player.position.copy(P.pos); player.rotation.y = Math.atan2(1.2, -0.6); }
   if (bannerT > 0) { bannerT -= dt; if (bannerT <= 0) $('banner').style.opacity = 0; }
-  camOff.set(0, portrait ? 21 : 16, portrait ? 13 : 11);
+  camOff.set(0, portrait ? 31.5 : 24, portrait ? 19.5 : 16.5);
   camera.position.lerp(new THREE.Vector3(P.pos.x + camOff.x, camOff.y, P.pos.z + camOff.z), state === 'start' ? 1 : Math.min(1, dt * 8));
   camera.lookAt(P.pos.x, 0.5, P.pos.z);
+  renderEnemies();
   renderer.render(scene, camera);
   requestAnimationFrame(loop);
 }
