@@ -68,6 +68,12 @@ Sacada de capturas de la tendencia "old dark fantasy" (CGI de finales de los 90)
 - Elementos recurrentes: soles con cara, ojos flotantes, gigantes de piedra con venas eléctricas, encapuchados rojos con casco plateado y ojos verdes, suelos de ajedrez, galaxias en espiral, setas con puntos brillantes, agua cian luminosa.
 - Ambiente: sueño raro, inquietante más que terrorífico; viñeta oscura morada.
 
+**Interfaz:**
+- Tipografías en `fonts/` (OFL): **Uncial Antiqua** solo para el título del juego, **Pirata One** para encabezados, botones y nombres, **VT323** (pixel) para el texto.
+- **Nada de emojis.** Los iconos son pixel art propio de 12×12 (`ICONS` + `icon()` en `index.html`, se pintan como SVG nítido); para uno nuevo, dibuja la cuadrícula con las letras de `ICON_PAL`.
+- Paneles con esquinas recortadas y doble borde biselado (clase `.frame`), barras segmentadas (vida rojo sangre, experiencia cian, jefe fuego), botones morados con texto dorado.
+- Menú de inicio: el mundo animado de fondo (cámara de cine alrededor del mago), título, un solo botón y el mejor tiempo.
+
 **Implementación actual:** shader común de personajes (`charShader`: moteado, rim light, ojos con brillo, venas) y post-proceso final (saturación, contraste, sombras moradas, viñeta que respira, leve posterizado). El color de cada pieza va en `PAL`; los modelos KayKit se recolorean en `tools/prepare-models.mjs`.
 
 ## Estado actual
