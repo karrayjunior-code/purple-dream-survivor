@@ -84,6 +84,9 @@ Sacada de capturas de la tendencia "old dark fantasy" (CGI de finales de los 90)
 - Todo se dibuja con la paleta de la Guía visual, shader de personaje y un post-proceso de color final.
 - Enemigos: sus animaciones (andar, golpe, morir) se hornean en fotogramas al cargar y se dibujan con InstancedMesh (pocas draw calls con 400 enemigos). El mago usa animaciones reales (correr, hechizo, golpe, morir).
 - Cámara en tercera persona a ~45º en vertical y ~42º en horizontal, mago al ~60% de la altura de pantalla para ver lo que viene por detrás; FOV 88 en vertical y 72 en horizontal, con una franja de cielo arriba. Textura del suelo sin costuras. Cielo pintado una vez en un canvas (degradado, estrellas, nubes de colores) con una luna con cara; la niebla tiene el color del horizonte y la cámara no dibuja más allá de 80 unidades.
+- Escenario: suelo con un shader de zonas (mapa de datos 512×512: piedra con grietas eléctricas, hierba morada, senderos de ajedrez, charcos cian animados). Decoración (setas, árboles retorcidos, torres con ventanas, cristales, caras de piedra, rocas, matas) hecha con piezas de muy pocos polígonos y fusionada por trozos de 40×40 (≈100k vértices en total, pocas draw calls). Siluetas de montañas, castillos y árboles en un anillo en el horizonte.
+- El mago lleva un círculo de luz bajo los pies y un borde de luz más claro que el resto.
+- Partículas de hechizos: un único sistema de puntos aditivos (`emit`/`burst`): estelas de proyectiles, chispas de lunas, remolino del portal, destellos de rayos, ácido de setas, brillo del ajedrez y al morir enemigos.
 - Los enemigos aparecen siempre fuera de la vista (`spawnPoint`: comprueba el campo de visión) o dentro de la niebla al frente.
 - Publicado con GitHub Pages: https://karrayjunior-code.github.io/purple-dream-survivor/
 - Implementado: 6 poderes, 5 pasivas, 6 tipos de enemigo, jefe Helioth a los 2:30, joystick táctil, pausa, mejor tiempo guardado.
