@@ -480,7 +480,7 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   portrait = w < h;
-  camera.fov = portrait ? 78 : 62;
+  camera.fov = portrait ? 88 : 72;
   camera.updateProjectionMatrix();
   renderer.getDrawingBufferSize(_dbs); postRT.setSize(_dbs.x, _dbs.y);
 }
@@ -499,16 +499,18 @@ function canvasTex(size, draw, rep) {
   if (rep) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rep, rep); }
   return t;
 }
+// Textura del suelo sin costuras: todo se pinta también desplazado ±tamaño para que los bordes casen al repetirse
 const groundTex = canvasTex(256, (g, s) => {
+  const OFF = [-s, 0, s], wrap = fn => { for (const dx of OFF) for (const dy of OFF) { g.save(); g.translate(dx, dy); fn(); g.restore(); } };
   g.fillStyle = '#2a1450'; g.fillRect(0, 0, s, s);
-  for (let i = 0; i < 260; i++) { g.fillStyle = `rgba(${rand(20,60)|0},${rand(60,110)|0},${rand(30,60)|0},0.22)`; g.beginPath(); g.arc(rand(0,s), rand(0,s), rand(4,18), 0, TAU); g.fill(); }
-  for (let i = 0; i < 160; i++) { g.fillStyle = 'rgba(100,40,170,0.22)'; g.beginPath(); g.arc(rand(0,s), rand(0,s), rand(4,16), 0, TAU); g.fill(); }
+  const blob = (fill, r0, r1) => { const x = rand(0, s), y = rand(0, s), r = rand(r0, r1); g.fillStyle = fill; wrap(() => { g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); }); };
+  for (let i = 0; i < 260; i++) blob(`rgba(${rand(20,60)|0},${rand(60,110)|0},${rand(30,60)|0},0.22)`, 4, 18);
+  for (let i = 0; i < 160; i++) blob('rgba(100,40,170,0.22)', 4, 16);
   g.strokeStyle = '#8a7bff'; g.lineWidth = 2; g.shadowColor = '#b9abff'; g.shadowBlur = 6;
   for (let v = 0; v < 12; v++) {
-    let x = rand(0, s), y = rand(0, s), a = rand(0, TAU);
-    g.beginPath(); g.moveTo(x, y);
-    for (let k = 0; k < 28; k++) { a += rand(-0.8, 0.8); x += Math.cos(a) * 6; y += Math.sin(a) * 6; g.lineTo(x, y); }
-    g.stroke();
+    let x = rand(0, s), y = rand(0, s), a = rand(0, TAU); const pts = [[x, y]];
+    for (let k = 0; k < 28; k++) { a += rand(-0.8, 0.8); x += Math.cos(a) * 6; y += Math.sin(a) * 6; pts.push([x, y]); }
+    wrap(() => { g.beginPath(); g.moveTo(...pts[0]); for (const q of pts) g.lineTo(...q); g.stroke(); });
   }
 }, 30);
 const starTex = canvasTex(128, (g, s) => {
@@ -1594,8 +1596,9 @@ function loop(now) {
     const b = now * 0.00012, r = portrait ? 10 : 8.5;
     camera.position.set(P.pos.x + Math.sin(b) * r, portrait ? 5 : 4.2, P.pos.z + Math.cos(b) * r);
     camera.lookAt(P.pos.x, 1.5, P.pos.z);
-  } else {   // tercera persona: cámara baja detrás del mago (~31-33º), mago en el tercio inferior
-    const el = (portrait ? 34 : 31) * Math.PI / 180, D = portrait ? 17 : 14.5, pitch = el - camera.fov / 6 * Math.PI / 180;
+  } else {   // tercera persona: cámara a ~42-45º detrás del mago, mago algo por debajo del centro
+    const el = (portrait ? 45 : 42) * Math.PI / 180, D = portrait ? 20 : 14.5;
+    const pitch = el - Math.atan(Math.tan(camera.fov / 2 * Math.PI / 180) * 0.2);   // mago al ~60% de la altura de pantalla
     camOff.set(P.pos.x, Math.sin(el) * D + 0.8, P.pos.z + Math.cos(el) * D);
     camera.position.lerp(camOff, Math.min(1, dt * 8)); camera.rotation.set(-pitch, 0, 0);
   }
