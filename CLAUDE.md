@@ -83,6 +83,8 @@ Sacada de capturas de la tendencia "old dark fantasy" (CGI de finales de los 90)
 - Goblin, ojo, gnomo y Helioth (el sol) están hechos por código con el mismo estilo (color por vértice + sombreado plano).
 - Todo se dibuja con la paleta de la Guía visual, shader de personaje y un post-proceso de color final.
 - Enemigos: sus animaciones (andar, golpe, morir) se hornean en fotogramas al cargar y se dibujan con InstancedMesh (pocas draw calls con 400 enemigos). El mago usa animaciones reales (correr, hechizo, golpe, morir).
+- Cámara en tercera persona baja (~31-34º, mago en el tercio inferior; FOV 78 en vertical y 62 en horizontal). Cielo pintado una vez en un canvas (degradado, estrellas, nubes de colores) con una luna con cara; la niebla tiene el color del horizonte y la cámara no dibuja más allá de 80 unidades.
+- Los enemigos aparecen siempre fuera de la vista (`spawnPoint`: comprueba el campo de visión) o dentro de la niebla al frente.
 - Publicado con GitHub Pages: https://karrayjunior-code.github.io/purple-dream-survivor/
 - Implementado: 6 poderes, 5 pasivas, 6 tipos de enemigo, jefe Helioth a los 2:30, joystick táctil, pausa, mejor tiempo guardado.
 - Pendiente: sonido/música, resto de jefes, balance de dificultad, SDK de CrazyGames.
