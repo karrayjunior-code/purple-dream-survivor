@@ -38,7 +38,7 @@ Inspirada en la tendencia de TikTok de CGI de finales de los 90 / principios de 
 
 **Pasivas:** Botas de niebla (velocidad), Corazón astral (vida), Imán de cristales (recogida), Orbe arcano (daño), Reloj de arena (cadencia).
 
-**Enemigos (mucha variedad):** goblins, esqueletos, ojos flotantes, encapuchados rojos (disparan) y gnomos súper raros (el gnomo se divide en 2 gnomos más débiles del mismo tamaño; se quieren más variantes raras).
+**Enemigos (mucha variedad):** goblins, esqueletos, ojos flotantes, encapuchados rojos (disparan) y gnomos súper raros (el gnomo se divide en 2 mini-gnomos más pequeños y débiles; se quieren más variantes raras).
 
 **Jefes:** gigantes surrealistas (**Helioth, el Sol que Sueña** ✅ implementado — sol con cara; la barra de vida muestra solo "Helioth" y el aviso el nombre completo —, gigante de piedra con rayos), magos oscuros (uno que copia tus hechizos), criaturas enormes (árbol vivo, dragón low-poly) y el rey gnomo.
 
