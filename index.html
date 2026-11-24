@@ -928,31 +928,138 @@ const PROC = {
     R.pop();
   },
 };
-// Jefe Helioth, el Sol que Sueña (modelo único, no instanciado): piedra de fuego con venas de lava y ojos brillantes
+// Jefe Helioth, el Sol que Sueña (modelo único, no instanciado): rostro esculpido de piedra de fuego con venas de lava
 const bossMat = charMat.clone();
-bossMat.onBeforeCompile = sh => charShader(sh, { vein: 'vec3(2.2, 1.1, 0.15)', veinScale: 0.4 });
+bossMat.onBeforeCompile = sh => charShader(sh, { vein: 'vec3(2.4, 1.0, 0.1)', veinScale: 0.55 });
+const HR = 2.1, HZ = 0.86;                                                   // radio de la cabeza y aplanado de la cara
+const gauss = (x, y, cx, cy, sx, sy) => Math.exp(-((x - cx) * (x - cx)) / (2 * sx * sx) - ((y - cy) * (y - cy)) / (2 * sy * sy));
+// Relieve del rostro en coordenadas de cara (x, y en [-1, 1] mirando a +Z). Devuelve el desplazamiento radial.
+function faceRelief(x, y, front) {
+  if (front <= 0) return 0;
+  const w = Math.min(1, front * 2.2) * 1.3;
+  let d = 0;
+  d += 0.06 * gauss(x, y, 0, 0.55, 0.45, 0.2);                                 // frente abombada
+  d += 0.13 * gauss(x, y, 0, 0.3, 0.42, 0.055) * (1 - Math.min(1, Math.abs(x) / 0.62));   // cejas marcadas (arco)
+  d -= 0.05 * gauss(x, y, 0, 0.33, 0.06, 0.05);                                // entrecejo fruncido
+  for (const s of [-1, 1]) {
+    d -= 0.2 * gauss(x, y, 0.29 * s, 0.13, 0.13, 0.1);                         // cuencas de los ojos
+    d += 0.055 * gauss(x, y, 0.3 * s, -0.04, 0.11, 0.045);                     // bolsas bajo los ojos
+    d += 0.11 * gauss(x, y, 0.47 * s, -0.1, 0.13, 0.12);                       // pómulos
+    d -= 0.05 * gauss(x, y, 0.33 * s, -0.33, 0.07, 0.16);                      // surcos junto a la boca
+    d -= 0.09 * gauss(x, y, 0.075 * s, -0.17, 0.028, 0.022);                   // orificios de la nariz
+    d += 0.09 * gauss(x, y, 0.085 * s, -0.135, 0.05, 0.04);                    // aletas de la nariz
+  }
+  d += 0.3 * gauss(x, y, 0, 0.02, 0.055, 0.2) * (0.35 + 0.65 * Math.min(1, Math.max(0, (0.28 - y) / 0.4)));   // nariz grande (crece hacia la punta)
+  d += 0.14 * gauss(x, y, 0, -0.11, 0.08, 0.06);                               // punta de la nariz
+  d -= 0.04 * gauss(x, y, 0, -0.4, 0.2, 0.08);                                 // hueco de la boca
+  d += 0.1 * gauss(x, y, 0, -0.66, 0.2, 0.1);                                  // barbilla
+  return d * w;
+}
+// Punto de la superficie (en el espacio de la cabeza) para unas coordenadas de cara
+function facePoint(x, y, out = new THREE.Vector3()) {
+  const z = Math.sqrt(Math.max(0, 1 - x * x - y * y)), r = HR * (1 + faceRelief(x, y, z));
+  return out.set(x * r, y * r, z * r * HZ);
+}
+function buildFaceGeo() {
+  const g = new THREE.SphereGeometry(1, 72, 54), p = g.attributes.position, n = p.count;
+  const col = new Float32Array(n * 3), fx = new Float32Array(n * 2), c1 = new THREE.Color(0x4a0600), c2 = new THREE.Color(0xd83800), c3 = new THREE.Color(0xff7a1a), tmp = new THREE.Color();
+  for (let i = 0; i < n; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i), d = faceRelief(x, y, z);
+    const ham = (vn2(x * 9 + 3, y * 9 + z * 7) - 0.5) * 0.035 + (vn2(x * 23, y * 23 + z * 19 + 5) - 0.5) * 0.015;   // metal martillado
+    const r = HR * (1 + d + ham);
+    p.setXYZ(i, x * r, y * r, z * r * HZ);
+    const k = Math.min(1, Math.max(0, (d + 0.12) / 0.3)), top = 0.5 + y * 0.5;
+    tmp.copy(c1).lerp(c2, Math.min(1, k * 1.4)).lerp(c3, Math.max(0, k - 0.55) * 1.6 + top * 0.15);
+    const m = 0.8 + vn2(x * 14 + 11, y * 14 + z * 9) * 0.4; col[i * 3] = tmp.r * m; col[i * 3 + 1] = tmp.g * m; col[i * 3 + 2] = tmp.b * m;
+    fx[i * 2 + 1] = z > 0.35 ? 0.18 : z > 0.1 ? 0.6 : 1;                           // venas de lava sobre todo en los lados y detrás: la cara se lee limpia
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setAttribute('fx', new THREE.BufferAttribute(fx, 2)); g.setAttribute('rest', g.attributes.position);
+  g.deleteAttribute('normal'); g.deleteAttribute('uv');
+  return g;
+}
+// Llamaradas: conos fusionados con un shader de fuego que ondula y parpadea
+const flameMat = new THREE.ShaderMaterial({
+  uniforms: { uTime: { value: 0 } },
+  vertexShader: `attribute float aRay; attribute vec3 aDir, aTan; uniform float uTime; varying vec2 vUv; varying float vRay;
+    void main() {
+      vUv = uv; vRay = aRay; float t = uv.y;
+      vec3 p = position + aTan * sin(uTime * 3.2 + aRay * 1.7 + t * 4.5) * 0.35 * t * t + aDir * sin(uTime * 2.3 + aRay * 2.9) * 0.35 * t;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+    }`,
+  fragmentShader: `uniform float uTime; varying vec2 vUv; varying float vRay;
+    float hh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(hh(i), hh(i + vec2(1.0, 0.0)), f.x), mix(hh(i + vec2(0.0, 1.0)), hh(i + vec2(1.0, 1.0)), f.x), f.y); }
+    void main() {
+      vec2 q = vec2(vUv.x * 7.0 + vRay * 3.1, vUv.y * 5.0 - uTime * 2.6);
+      float n = vn(q) * 0.6 + vn(q * 2.3 + 4.0) * 0.4;
+      vec3 col = mix(vec3(1.0, 0.95, 0.5), vec3(1.0, 0.5, 0.05), smoothstep(0.1, 0.6, vUv.y));
+      col = mix(col, vec3(0.85, 0.08, 0.02), smoothstep(0.55, 1.0, vUv.y));
+      float a = (0.55 + 0.75 * n) * (1.0 - smoothstep(0.7, 1.0, vUv.y) * (1.2 - n));
+      gl_FragColor = vec4(col * a * 1.5, 1.0);
+    }`,
+  transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+});
+function buildFlames() {
+  const N = 16, base = new THREE.ConeGeometry(0.5, 1, 7, 6, true), bp = base.attributes.position, bu = base.attributes.uv, bi = base.index.array, nv = bp.count;
+  const pos = new Float32Array(N * nv * 3), uv = new Float32Array(N * nv * 2), ray = new Float32Array(N * nv), dir = new Float32Array(N * nv * 3), tan = new Float32Array(N * nv * 3), idx = [];
+  for (let k = 0; k < N; k++) {
+    const a = k / N * TAU, L = k % 2 ? 1.5 : 2.3, w = k % 2 ? 0.75 : 1, m = mtx(Math.cos(a) * (HR + L / 2 - 0.25), Math.sin(a) * (HR + L / 2 - 0.25), -0.5, 0, 0, a - Math.PI / 2, w, L, w * 0.45);
+    for (let i = 0; i < nv; i++) {
+      const o = k * nv + i; _v.fromBufferAttribute(bp, i).applyMatrix4(m);
+      pos.set([_v.x, _v.y, _v.z], o * 3); uv.set([bu.getX(i), bu.getY(i)], o * 2); ray[o] = k;
+      dir.set([Math.cos(a), Math.sin(a), 0], o * 3); tan.set([-Math.sin(a), Math.cos(a), 0], o * 3);
+    }
+    for (const j of bi) idx.push(j + k * nv);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setAttribute('aRay', new THREE.BufferAttribute(ray, 1));
+  g.setAttribute('aDir', new THREE.BufferAttribute(dir, 3)); g.setAttribute('aTan', new THREE.BufferAttribute(tan, 3)); g.setIndex(idx);
+  return g;
+}
 function buildBoss() {
   const g = new THREE.Group(), h = new THREE.Group(); h.position.y = 3.4; g.add(h); g.userData.float = h; g.userData.fy = 3.4;
+  h.add(new THREE.Mesh(buildFaceGeo(), bossMat));
+  const rays = new THREE.Mesh(buildFlames(), flameMat); rays.frustumCulled = false; h.add(rays); g.userData.rays = rays;
+  // Ojos: globo pálido con iris de fuego que sigue al jugador; párpados pesados que parpadean despacio
   let R = Rig();
-  R.fx(0, 1).add(CG.ico, 0xe83a00, 2.1, 2.1, 1.75, 0, 0, 0, 0, 0, 0, 0.6).fx(0);
+  R.fx(0.45).add(CG.sph, 0xfff0d0, 0.34, 0.34, 0.34, 0, 0, 0, 0, 0, 0, 0.3);
+  R.fx(1).add(CG.sph, 0xff7a00, 0.19, 0.19, 0.08, 0, 0, 0.29, 0, 0, 0, 0.4);
+  R.fx(0).add(CG.sph, 0x0a0002, 0.095, 0.1, 0.05, 0, 0, 0.345, 0, 0, 0, 0);
+  const eyeGeo = mergeParts(R.parts);
+  R = Rig(); R.add(CG.half, 0xb02a00, 0.385, 0.385, 0.385, 0, 0, 0, 0, 0, 0, 0.5); R.add(CG.cyl, 0x3a0400, 0.385, 0.05, 0.385, 0, 0.01, 0, 0, 0, 0, 0);
+  const lidGeo = mergeParts(R.parts);
+  g.userData.eyes = []; g.userData.lids = [];
   for (const s of [-1, 1]) {
-    R.add(CG.sph, PAL.blood, 0.45, 0.3, 0.15, 1.15 * s, -0.4, 1.32, 0, 0, 0, 0.2);
-    R.fx(0.7).add(CG.sph, 0xffe0a0, 0.55, 0.45, 0.22, 0.72 * s, 0.45, 1.55, 0, 0, 0, 0.2);
-    R.fx(0).add(CG.sph, 0x0a0004, 0.22, 0.26, 0.1, 0.66 * s, 0.4, 1.74, 0, 0, 0, 0);
-    R.add(CG.half, 0xc02a00, 0.6, 0.38, 0.3, 0.72 * s, 0.47, 1.52, 0.35, 0, 0, 0.3);
-    R.add(CG.box, 0x4a0600, 0.7, 0.14, 0.18, 0.75 * s, 1.0, 1.45, 0, 0, s * 0.28, 0.2);
+    const socket = new THREE.Group(); facePoint(0.29 * s, 0.13, socket.position); socket.position.z -= 0.12; h.add(socket);
+    const eye = new THREE.Mesh(eyeGeo, bossMat); socket.add(eye); g.userData.eyes.push(eye);
+    const lid = new THREE.Mesh(lidGeo, bossMat); socket.add(lid); g.userData.lids.push(lid);
   }
-  R.add(CG.sph, 0xff4a10, 0.3, 0.38, 0.32, 0, 0.0, 1.6, 0, 0, 0, 0.4);
-  h.add(new THREE.Mesh(mergeParts(R.parts), bossMat));
-  R = Rig();
-  for (let i = 0; i < 14; i++) { const a = i / 14 * TAU, l = i % 2 ? 1.25 : 1.7; R.fx(0.55, 1).add(CG.cone, i % 2 ? PAL.gold : PAL.fire, 0.42, l, 0.22, Math.cos(a) * (2.0 + l / 2), Math.sin(a) * (2.0 + l / 2), -0.25, 0, 0, a - Math.PI / 2, 0.5); }
-  const rays = new THREE.Mesh(mergeParts(R.parts), bossMat); h.add(rays); g.userData.rays = rays;
-  R = Rig();
-  R.add(CG.sph, 0x2a0010, 0.72, 0.42, 0.2, 0, 0, 0, 0, 0, 0, 0.2);
-  R.add(CG.sph, 0xd0102a, 0.4, 0.16, 0.1, 0, -0.18, 0.08, 0, 0, 0, 0.2);
-  R.add(CG.box, 0xffe8c0, 0.8, 0.1, 0.12, 0, 0.3, 0.05, 0, 0, 0, 0);
-  const mouth = new THREE.Mesh(mergeParts(R.parts), bossMat); mouth.position.set(0, -0.8, 1.6); h.add(mouth); g.userData.mouth = mouth;
+  // Labios gruesos y rojos; el de abajo baja al abrir la boca antes de cada ataque
+  const mouth = new THREE.Group(); facePoint(0, -0.4, mouth.position); mouth.position.z -= 0.02; h.add(mouth);
+  R = Rig(); R.add(CG.sph, 0x1a0004, 0.5, 0.2, 0.15, 0, -0.04, -0.06, 0, 0, 0, 0);
+  mouth.add(new THREE.Mesh(mergeParts(R.parts), bossMat));
+  R = Rig(); R.fx(0.05).add(CG.sph, 0xa00818, 0.58, 0.14, 0.22, 0, 0.08, 0, 0.15, 0, 0, 0.5).add(CG.sph, 0xb80c20, 0.24, 0.1, 0.18, 0, 0.12, 0.05, 0, 0, 0, 0.3);
+  const upper = new THREE.Mesh(mergeParts(R.parts), bossMat); mouth.add(upper);
+  R = Rig(); R.fx(0.05).add(CG.sph, 0x980614, 0.52, 0.17, 0.23, 0, -0.1, 0, -0.1, 0, 0, 0.5);
+  const lower = new THREE.Mesh(mergeParts(R.parts), bossMat); mouth.add(lower);
+  Object.assign(g.userData, { lowerLip: lower, mouthOpen: 0, blinkT: rand(2, 5), blink: 0 });
   return g;
+}
+// Animación sutil del jefe: llamaradas, parpadeo lento, mirada hacia el jugador y boca antes de atacar
+const _look = new THREE.Vector3(), _eul = new THREE.Euler();
+function animBoss(g, e, dt) {
+  const u = g.userData; flameMat.uniforms.uTime.value = time;
+  u.blinkT -= dt; if (u.blinkT <= 0) { u.blink = 0.45; u.blinkT = rand(3, 6.5); }
+  let close = 0; if (u.blink > 0) { u.blink -= dt; close = Math.sin(Math.max(0, u.blink) / 0.45 * Math.PI); }
+  const lidA = -0.22 + Math.sin(time * 0.7) * 0.04 + close * 0.95;            // párpados pesados, medio cerrados
+  for (const l of u.lids) l.rotation.x = lidA;
+  _look.set(P.pos.x, 1.4, P.pos.z);
+  for (const eye of u.eyes) {
+    eye.lookAt(_look); _eul.setFromQuaternion(eye.quaternion, 'YXZ');
+    eye.rotation.set(Math.max(-0.5, Math.min(0.55, _eul.x)), Math.max(-0.5, Math.min(0.5, _eul.y)), 0, 'YXZ');
+  }
+  u.mouthOpen += ((e.shootT < 0.7 ? 1 - e.shootT / 0.7 : 0) - u.mouthOpen) * Math.min(1, dt * 10);
+  u.lowerLip.position.y = -u.mouthOpen * 0.3; u.lowerLip.rotation.x = u.mouthOpen * 0.3;
 }
 const B = { boss: buildBoss };
 
@@ -1884,14 +1991,14 @@ function update(dt) {
     g.rotation.y = Math.atan2(dx, dz);
     if (e.def.boss) {
       g.userData.float.position.y = g.userData.fy + Math.sin(time * 3 + e.ph) * 0.25;
-      g.userData.mouth.scale.y = 0.5 + (e.shootT < 0.7 ? (0.7 - e.shootT) * 2.2 : 0);
+      animBoss(g, e, dt);
       bossMat.emissive.setScalar(e.hitT > 0 ? 0.45 : 0);
     } else e.hitA -= dt;
     if (e.hitT > 0) { e.hitT -= dt; g.scale.setScalar(e.sc * (1 + e.hitT * 2)); } else g.scale.setScalar(e.sc);
     if (d < e.r + 0.5 && P.inv <= 0) damagePlayer(e.dmg);
     if (e.def.shoots) { e.shootT -= dt; if (e.shootT <= 0 && d < 15) { enemyBolt(g.position.x, g.position.z, dx / d, dz / d, 7, 8); e.shootT = rand(2.5, 4); } }
     if (e.def.boss) {
-      g.userData.rays.rotation.z += dt * 0.8;
+      g.userData.rays.rotation.z += dt * 0.25;
       bossLight.position.set(g.position.x, 4, g.position.z);
       e.shootT -= dt;
       if (e.shootT <= 0) { e.shootT = 3; const off = rand(0, TAU); for (let i = 0; i < 14; i++) { const a = off + i / 14 * TAU; enemyBolt(g.position.x, g.position.z, Math.cos(a), Math.sin(a), 6, 12, 2); } }
