@@ -12,7 +12,7 @@ import path from 'path';
 const [SRC, DST] = process.argv.slice(2);
 const CFG = {
   mago: { src: 'Mage.glb', drop: ['Spellbook', 'Spellbook_open', '1H_Wand'],
-    anims: { Idle: 'idle', Running_A: 'run', Hit_A: 'hit', Death_A: 'die', Spellcast_Shoot: 'cast' }, tex: 64 },
+    anims: { Idle: 'idle', Running_A: 'run', Hit_A: 'hit', Death_A: 'die', Spellcast_Shoot: 'cast' }, tex: 256 },
   esqueleto: { src: 'Skeleton_Minion.glb', drop: [],
     anims: { Walking_D_Skeletons: 'walk', Hit_A: 'hit', Death_A: 'die' }, bake: true, ratio: 0.2, error: 0.05, recolor: 'skeleton' },
   encapuchado: { src: 'Rogue_Hooded.glb', drop: ['Knife_Offhand', '1H_Crossbow', '2H_Crossbow', 'Knife', 'Throwable'],

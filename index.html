@@ -11,7 +11,7 @@
   :root{--ink:#12041f;--deep:#1a0638;--plum:#2a0a52;--purple:#7a1cff;--violet:#b04aff;--lilac:#e2c4ff;--gold:#ffb300;--goldl:#fff08a;--blood:#b0001e;--red:#ff2a4a;--fire:#ff5a00;--acid:#8cff1a;--cyan:#3ef0ff;--elec:#1e5bff;
     --cut:polygon(6px 0,calc(100% - 6px) 0,100% 6px,100% calc(100% - 6px),calc(100% - 6px) 100%,6px 100%,0 calc(100% - 6px),0 6px)}
   html,body{margin:0;height:100%;overflow:hidden;background:var(--ink);font-family:'Pix',monospace;color:var(--lilac);touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
-  #c{position:fixed;inset:0;width:100vw;height:100vh;image-rendering:pixelated;display:block}
+  #c{position:fixed;inset:0;width:100vw;height:100vh;display:block}
   .ico{width:1em;height:1em;display:inline-block;vertical-align:-0.15em;image-rendering:pixelated;flex:none}
   .hidden{display:none!important}
 
@@ -607,13 +607,28 @@ scene.background = new THREE.Color(HORIZON);
 scene.fog = new THREE.Fog(HORIZON, 26, 70);
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 80);   // más allá todo es niebla: no se dibuja
 // Post-proceso ligero: se pinta la escena en una textura y un único pase la lleva a la paleta del juego
-const postRT = new THREE.WebGLRenderTarget(1, 1, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+const postRT = new THREE.WebGLRenderTarget(1, 1, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
 const postMat = new THREE.ShaderMaterial({
-  uniforms: { tScene: { value: postRT.texture }, uTime: { value: 0 } },
+  uniforms: { tScene: { value: postRT.texture }, uTime: { value: 0 }, uRcp: { value: new THREE.Vector2(1, 1) } },
   vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
-  fragmentShader: `uniform sampler2D tScene; uniform float uTime; varying vec2 vUv;
+  fragmentShader: `uniform sampler2D tScene; uniform float uTime; uniform vec2 uRcp; varying vec2 vUv;
+    // FXAA ligero: suaviza los bordes dentados con 9 lecturas por píxel
+    vec3 fxaa(vec2 uv) {
+      const vec3 L = vec3(0.299, 0.587, 0.114);
+      vec3 cNW = texture2D(tScene, uv + vec2(-1.0, -1.0) * uRcp).rgb, cNE = texture2D(tScene, uv + vec2(1.0, -1.0) * uRcp).rgb;
+      vec3 cSW = texture2D(tScene, uv + vec2(-1.0, 1.0) * uRcp).rgb, cSE = texture2D(tScene, uv + vec2(1.0, 1.0) * uRcp).rgb, cM = texture2D(tScene, uv).rgb;
+      float lNW = dot(cNW, L), lNE = dot(cNE, L), lSW = dot(cSW, L), lSE = dot(cSE, L), lM = dot(cM, L);
+      float lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE))), lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+      if (lMax - lMin < max(0.04, lMax * 0.12)) return cM;                        // sin borde: no toca nada (no emborrona)
+      vec2 dir = vec2(-((lNW + lNE) - (lSW + lSE)), (lNW + lSW) - (lNE + lSE));
+      float red = max((lNW + lNE + lSW + lSE) * 0.03125, 0.0078125), rcpMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + red);
+      dir = clamp(dir * rcpMin, vec2(-8.0), vec2(8.0)) * uRcp;
+      vec3 a = 0.5 * (texture2D(tScene, uv + dir * (1.0 / 3.0 - 0.5)).rgb + texture2D(tScene, uv + dir * (2.0 / 3.0 - 0.5)).rgb);
+      vec3 b = a * 0.5 + 0.25 * (texture2D(tScene, uv - dir * 0.5).rgb + texture2D(tScene, uv + dir * 0.5).rgb);
+      float lb = dot(b, L); return (lb < lMin || lb > lMax) ? a : b;
+    }
     void main() {
-      vec3 c = texture2D(tScene, vUv).rgb;
+      vec3 c = fxaa(vUv);
       float l = dot(c, vec3(0.299, 0.587, 0.114));
       c = mix(vec3(l), c, 1.45);                                                   // colores muy saturados
       c = (c - 0.45) * 1.15 + 0.45;                                                // más contraste
@@ -622,7 +637,6 @@ const postMat = new THREE.ShaderMaterial({
       vec2 d = (vUv - 0.5) * vec2(1.0, 1.2);
       float vg = smoothstep(0.95, 0.25, length(d) + sin(uTime * 0.7) * 0.025);     // viñeta que "respira"
       c *= mix(vec3(0.22, 0.03, 0.38), vec3(1.0), vg);
-      c = floor(c * 30.0 + 0.5) / 30.0;                                            // leve posterizado retro
       gl_FragColor = vec4(c, 1.0);
     }`,
   depthTest: false, depthWrite: false,
@@ -636,15 +650,30 @@ function renderFrame(t) {
   renderer.setRenderTarget(null); renderer.render(postScene, postCam);
 }
 let portrait = false;
+// Resolución: 100% en PC (hasta 2x), ~75-90% en móvil; 'dynScale' la baja solo lo necesario si el dispositivo va lento
+const IS_MOBILE = matchMedia('(pointer: coarse)').matches;
+let dynScale = 1;
+const basePR = () => IS_MOBILE ? Math.min(devicePixelRatio || 1, 2.5) * 0.9 : Math.min(devicePixelRatio || 1, 2);
 function resize() {
   const w = innerWidth, h = innerHeight;
-  renderer.setPixelRatio(Math.max(0.5, Math.min(devicePixelRatio || 1, 2) * 0.5));
+  renderer.setPixelRatio(Math.max(0.5, basePR() * dynScale));
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   portrait = w < h;
   camera.fov = portrait ? 88 : 72;
   camera.updateProjectionMatrix();
-  renderer.getDrawingBufferSize(_dbs); postRT.setSize(_dbs.x, _dbs.y);
+  renderer.getDrawingBufferSize(_dbs); postRT.setSize(_dbs.x, _dbs.y); postMat.uniforms.uRcp.value.set(1 / _dbs.x, 1 / _dbs.y);
+}
+// Medidor de fluidez: cada 1,5 s mira el tiempo medio por fotograma y ajusta la resolución con margen (sin oscilar)
+const perf = { acc: 0, n: 0, good: 0 };
+function perfTick(raw) {
+  if (raw > 0.25 || document.hidden) return;                                     // pestaña en segundo plano o tirón puntual
+  perf.acc += raw; perf.n++;
+  if (perf.acc < 1.5) return;
+  const avg = perf.acc / perf.n; perf.acc = perf.n = 0;
+  if (avg > 1 / 45 && dynScale > 0.5) { dynScale = Math.max(0.5, dynScale - (avg > 1 / 30 ? 0.15 : 0.08)); perf.good = 0; resize(); }
+  else if (avg < 1 / 56 && dynScale < 1) { if ((perf.good += 1.5) >= 6) { dynScale = Math.min(1, dynScale + 0.05); perf.good = 0; resize(); } }
+  else perf.good = 0;
 }
 addEventListener('resize', resize); resize();
 
@@ -653,11 +682,13 @@ const sunL = new THREE.DirectionalLight(0xffd9a8, 0.55); sunL.position.set(-10, 
 const bossLight = new THREE.PointLight(0xff6a1a, 0, 18); scene.add(bossLight);
 
 // ---------- Texturas generadas ----------
-function canvasTex(size, draw, rep) {
-  const c = document.createElement('canvas'); c.width = c.height = size;
-  draw(c.getContext('2d'), size);
+const ANISO = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+// Se pinta a 'hi' veces el tamaño lógico para que no se vea borrosa; filtrado suave con mipmaps
+function canvasTex(size, draw, rep, hi = 2) {
+  const c = document.createElement('canvas'); c.width = c.height = size * hi;
+  const g = c.getContext('2d'); g.scale(hi, hi); draw(g, size);
   const t = new THREE.CanvasTexture(c);
-  t.magFilter = THREE.NearestFilter;
+  t.anisotropy = ANISO;
   if (rep) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rep, rep); }
   return t;
 }
@@ -674,7 +705,7 @@ const groundTex = canvasTex(256, (g, s) => {
     for (let k = 0; k < 28; k++) { a += rand(-0.8, 0.8); x += Math.cos(a) * 6; y += Math.sin(a) * 6; pts.push([x, y]); }
     wrap(() => { g.beginPath(); g.moveTo(...pts[0]); for (const q of pts) g.lineTo(...q); g.stroke(); });
   }
-}, 30);
+}, 30, 4);
 const starTex = canvasTex(128, (g, s) => {
   g.fillStyle = '#1d1f7a'; g.fillRect(0, 0, s, s);
   for (let i = 0; i < 45; i++) { g.fillStyle = pick(['#ffe66b', '#ffffff', '#b9a3ff']); const x = rand(0,s), y = rand(0,s), r = rand(1,3); g.fillRect(x - r, y - 0.6, r * 2, 1.2); g.fillRect(x - 0.6, y - r, 1.2, r * 2); }
@@ -975,7 +1006,7 @@ const stoneTex = canvasTex(128, (g, s) => {
   }
   g.strokeStyle = '#3e7bff'; g.lineWidth = 1; g.shadowColor = '#3e7bff'; g.shadowBlur = 4;   // grietas eléctricas
   for (let v = 0; v < 5; v++) { let x = rand(0, s), y = rand(0, s); g.beginPath(); g.moveTo(x, y); for (let k = 0; k < 6; k++) { x += rand(-8, 8); y += rand(-8, 8); g.lineTo(x, y); } g.stroke(); }
-}, 0);
+}, 0, 4);
 const grassTex = canvasTex(128, (g, s) => {
   g.fillStyle = '#2a0a52'; g.fillRect(0, 0, s, s);
   for (let i = 0; i < 700; i++) {
@@ -983,7 +1014,7 @@ const grassTex = canvasTex(128, (g, s) => {
     g.strokeStyle = pick(['#5a18a8', '#7a2ad0', '#b04aff', '#3a0f7a', '#8c3cff']); g.lineWidth = 1.5;
     for (const dx of [0, -s, s]) for (const dy of [0, s]) { g.beginPath(); g.moveTo(x + dx, y + dy); g.lineTo(x + dx + rand(-2, 2), y + dy - h); g.stroke(); }
   }
-}, 0);
+}, 0, 4);
 for (const t of [stoneTex, grassTex]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; }
 const groundMat = new THREE.ShaderMaterial({
   uniforms: Object.assign(THREE.UniformsUtils.merge([THREE.UniformsLib.fog]), { tZone: { value: zoneTex }, tBase: { value: groundTex }, tStone: { value: stoneTex }, tGrass: { value: grassTex }, uTime: { value: 0 } }),
@@ -1121,7 +1152,7 @@ const silTex = (() => {
   // bruma que funde la base con la niebla
   const gr = g.createLinearGradient(0, hy - 40, 0, hy + 4); gr.addColorStop(0, hor + '00'); gr.addColorStop(1, hor + 'ff');
   g.fillStyle = gr; g.fillRect(0, hy - 40, W, 44); g.fillStyle = hor; g.fillRect(0, hy + 4, W, H);
-  const t = new THREE.CanvasTexture(cv); t.wrapS = THREE.RepeatWrapping; t.repeat.x = 2; t.magFilter = THREE.NearestFilter; return t;
+  const t = new THREE.CanvasTexture(cv); t.wrapS = THREE.RepeatWrapping; t.repeat.x = 2; t.anisotropy = ANISO; return t;
 })();
 const horizonBand = new THREE.Mesh(new THREE.CylinderGeometry(70, 70, 20, 48, 1, true), new THREE.MeshBasicMaterial({ map: silTex, transparent: true, side: THREE.BackSide, fog: false, depthWrite: false }));
 horizonBand.frustumCulled = false; horizonBand.renderOrder = -8; scene.add(horizonBand);
@@ -1323,7 +1354,7 @@ function setupMage(gltf) {
   const bb = new THREE.Box3().setFromObject(m), s = 2.8 / (bb.max.y - bb.min.y);
   m.scale.setScalar(s); m.position.y = -bb.min.y * s;
   let tex = null; m.traverse(o => { if (o.isMesh && o.material.map) tex = o.material.map; });
-  tex.magFilter = tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.encoding = THREE.LinearEncoding; tex.needsUpdate = true;
+  tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true; tex.anisotropy = ANISO; tex.encoding = THREE.LinearEncoding; tex.needsUpdate = true;
   const mk = skinning => { const mt = new THREE.MeshPhongMaterial({ map: tex, flatShading: true, skinning, shininess: 22, specular: 0x4a2a88 }); mt.onBeforeCompile = sh => charShader(sh, { mage: true, scale: s }); return mt; };
   const mS = mk(true), mR = mk(false);
   m.traverse(o => { if (o.isMesh) { o.material = o.isSkinnedMesh ? mS : mR; o.frustumCulled = false; } });
@@ -1958,7 +1989,8 @@ const camOff = new THREE.Vector3(), sepGrid = new Map();
 let last = performance.now();
 reset();
 function loop(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const raw = (now - last) / 1000, dt = Math.min(0.05, raw); last = now;
+  if (state === 'play' || state === 'start') perfTick(raw);
   if (state === 'play') { update(dt); updateHud(); }
   if (state === 'play' || state === 'start') updateFx(dt);
   if (state === 'start') {   // menú: el mago recorre el sueño en un gran círculo
