@@ -87,10 +87,11 @@ Sacada de capturas de la tendencia "old dark fantasy" (CGI de finales de los 90)
 - Escenario: suelo con un shader de zonas (mapa de datos 512×512: piedra con grietas eléctricas, hierba morada, senderos de ajedrez, charcos cian animados). Decoración (setas, árboles retorcidos, torres con ventanas, cristales, caras de piedra, rocas, matas) hecha con piezas de muy pocos polígonos y fusionada por trozos de 40×40 (≈100k vértices en total, pocas draw calls). Siluetas de montañas, castillos y árboles en un anillo en el horizonte.
 - El mago lleva un círculo de luz bajo los pies y un borde de luz más claro que el resto.
 - Partículas de hechizos: un único sistema de puntos aditivos (`emit`/`burst`): estelas de proyectiles, chispas de lunas, remolino del portal, destellos de rayos, ácido de setas, brillo del ajedrez y al morir enemigos.
+- Sonido (módulo `SND`): todo sintetizado con Web Audio, sin archivos. Efectos por poder, golpes, muertes, cristales (suben de tono en racha), subir de nivel, daño, Helioth y game over; música en bucle por secuenciador (tranquila 70 bpm inquietante y otra de jefe 128 bpm, con fundido). Límite de voces por sonido, eco compartido y compresor. Arranca al pulsar "Jugar"; se suspende en pausa; botón de silencio (y tecla M) recordado en `localStorage`.
 - Los enemigos aparecen siempre fuera de la vista (`spawnPoint`: comprueba el campo de visión) o dentro de la niebla al frente.
 - Publicado con GitHub Pages: https://karrayjunior-code.github.io/purple-dream-survivor/
 - Implementado: 6 poderes, 5 pasivas, 6 tipos de enemigo, jefe Helioth a los 2:30, joystick táctil, pausa, mejor tiempo guardado.
-- Pendiente: sonido/música, resto de jefes, balance de dificultad, SDK de CrazyGames.
+- Pendiente: resto de jefes, balance de dificultad, SDK de CrazyGames.
 
 ## Forma de trabajar
 - El dueño prueba desde el **móvil** usando el enlace de GitHub Pages: después de cada cambio, haz commit y push a `main` para que se publique.

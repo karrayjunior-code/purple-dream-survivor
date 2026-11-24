@@ -46,6 +46,10 @@
   #pauseBtn{pointer-events:auto;width:40px;height:40px;padding:0;border:0;cursor:pointer;display:grid;place-items:center;color:inherit}
   #pauseBtn .ico{width:26px;height:26px}
   #pauseBtn:active{transform:translateY(2px)}
+  .iconbtn{pointer-events:auto;width:40px;height:40px;padding:0;border:0;cursor:pointer;display:grid;place-items:center;color:inherit}
+  .iconbtn .ico{width:26px;height:26px}
+  .iconbtn:active{transform:translateY(2px)}
+  #muteBtn2{position:absolute;top:14px;right:14px}
   #powers{position:fixed;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:6px;flex-wrap:wrap;justify-content:center;width:min(96vw,620px)}
   .pw{position:relative;width:38px;height:38px;display:grid;place-items:center}
   .pw .ico{width:24px;height:24px}
@@ -131,6 +135,7 @@
     <div class="right">
       <div class="kills frame"><span id="killicon"></span><span id="kills">0</span></div>
       <button id="pauseBtn" class="frame" aria-label="Pausa"></button>
+      <button id="muteBtn" class="frame iconbtn" aria-label="Silenciar"></button>
     </div>
   </div>
   <div id="powers"></div>
@@ -140,6 +145,7 @@
 <div id="dmgflash"></div>
 
 <div id="start" class="overlay">
+  <button id="muteBtn2" class="frame iconbtn" aria-label="Silenciar"></button>
   <div class="title">
     <h1><span class="l1">Purple Dream</span><span class="l2">Survivor</span></h1>
     <div class="orn"><span></span></div>
@@ -402,6 +408,32 @@ const ICONS = {
     '..kkkk.kkkk.',
     '............',
     '............'],
+  sound: [
+    '............',
+    '.....kk.....',
+    '....kvk..l..',
+    'kkkkvvk...l.',
+    'klllvvk.l..l',
+    'klllvvk..l.l',
+    'klllvvk..l.l',
+    'klllvvk.l..l',
+    'kkkkvvk...l.',
+    '....kvk..l..',
+    '.....kk.....',
+    '............'],
+  mute: [
+    '............',
+    '.....kk.....',
+    '....kvk.....',
+    'kkkkvvk.....',
+    'klllvvk.R..R',
+    'klllvvk..RR.',
+    'klllvvk..RR.',
+    'klllvvk.R..R',
+    'kkkkvvk.....',
+    '....kvk.....',
+    '.....kk.....',
+    '............'],
   star: [
     '.....kk.....',
     '....kYyk....',
@@ -435,6 +467,136 @@ function icon(name, cls = '') {
 // Iconos fijos del HUD
 $('hpicon').innerHTML = icon('vit'); $('killicon').innerHTML = icon('skull'); $('pauseBtn').innerHTML = icon('pause');
 $('bossname').innerHTML = icon('sun') + 'Helioth' + icon('sun');
+
+// ---------- Sonido: todo sintetizado con Web Audio (no pesa nada) ----------
+const SND = (() => {
+  let ctx = null, master, sfxBus, musBus, calmBus, bossBus, echoIn, noiseBuf, muted = false, voices = {}, schedTimer = null;
+  try { muted = localStorage.getItem('pds_mute') === '1'; } catch (e) {}
+  const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+  function init() {
+    if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    ctx = new AC();
+    const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -16; comp.ratio.value = 6; comp.connect(ctx.destination);
+    master = ctx.createGain(); master.gain.value = muted ? 0 : 1.4; master.connect(comp);
+    sfxBus = ctx.createGain(); sfxBus.gain.value = 0.55; sfxBus.connect(master);
+    musBus = ctx.createGain(); musBus.gain.value = 0.5; musBus.connect(master);
+    calmBus = ctx.createGain(); calmBus.gain.value = 0; calmBus.connect(musBus);
+    bossBus = ctx.createGain(); bossBus.gain.value = 0; bossBus.connect(musBus);
+    // eco de sueño (delay con realimentación) compartido por música y efectos
+    echoIn = ctx.createGain(); const dl = ctx.createDelay(1), fb = ctx.createGain(), lp = ctx.createBiquadFilter();
+    dl.delayTime.value = 0.36; fb.gain.value = 0.42; lp.type = 'lowpass'; lp.frequency.value = 2200;
+    echoIn.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(master);
+    noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate); const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+    if (ctx.state === 'suspended') ctx.resume();
+    schedTimer = setInterval(schedule, 60);
+  }
+  // --- piezas básicas ---
+  function env(g, t, a, d, peak) { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + d); }
+  function tone(o) {   // { f, f2, type, t, a, d, v, out, echo, det }
+    const t = o.t || ctx.currentTime, osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = o.type || 'sine'; osc.frequency.setValueAtTime(o.f, t); if (o.f2) osc.frequency.exponentialRampToValueAtTime(o.f2, t + (o.a || 0.005) + o.d);
+    if (o.det) osc.detune.value = o.det;
+    env(g, t, o.a || 0.005, o.d, o.v); osc.connect(g); g.connect(o.out || sfxBus); if (o.echo) { const e = ctx.createGain(); e.gain.value = o.echo; g.connect(e); e.connect(echoIn); }
+    osc.start(t); osc.stop(t + (o.a || 0.005) + o.d + 0.05);
+  }
+  function noise(o) {  // { t, a, d, v, type, f, f2, q, out, echo }
+    const t = o.t || ctx.currentTime, src = ctx.createBufferSource(), flt = ctx.createBiquadFilter(), g = ctx.createGain();
+    src.buffer = noiseBuf; src.loop = true; flt.type = o.type || 'bandpass'; flt.frequency.setValueAtTime(o.f || 1000, t); flt.Q.value = o.q || 1;
+    if (o.f2) flt.frequency.exponentialRampToValueAtTime(o.f2, t + (o.a || 0.005) + o.d);
+    env(g, t, o.a || 0.005, o.d, o.v); src.connect(flt); flt.connect(g); g.connect(o.out || sfxBus); if (o.echo) { const e = ctx.createGain(); e.gain.value = o.echo; g.connect(e); e.connect(echoIn); }
+    src.start(t, Math.random() * 0.5); src.stop(t + (o.a || 0.005) + o.d + 0.05);
+  }
+  // --- efectos ---
+  const FX = {
+    eye: v => { tone({ f: 1300, f2: 420, type: 'triangle', d: 0.09, v: 0.16 * v, echo: 0.3 }); tone({ f: 2600, f2: 900, type: 'sine', d: 0.05, v: 0.05 * v }); },
+    moon: v => { const f = pick([1046, 1175, 1318, 1568]); tone({ f, type: 'sine', d: 0.35, v: 0.1 * v, echo: 0.5 }); tone({ f: f * 2.76, type: 'sine', d: 0.12, v: 0.03 * v }); },
+    chess: v => { tone({ f: 330, type: 'square', d: 0.07, v: 0.06 * v }); tone({ f: 494, type: 'square', d: 0.07, v: 0.06 * v, t: ctx.currentTime + 0.08 }); noise({ type: 'highpass', f: 5000, d: 0.04, v: 0.12 * v }); },
+    portal: v => { noise({ f: 300, f2: 2400, q: 6, a: 0.25, d: 0.7, v: 0.22 * v, echo: 0.4 }); tone({ f: 110, f2: 55, type: 'sine', a: 0.1, d: 0.8, v: 0.2 * v }); tone({ f: 880, f2: 1760, type: 'sine', a: 0.3, d: 0.4, v: 0.04 * v, echo: 0.6 }); },
+    storm: v => { noise({ type: 'highpass', f: 1800, d: 0.12, v: 0.4 * v }); noise({ type: 'lowpass', f: 400, f2: 90, a: 0.02, d: 0.7, v: 0.45 * v }); tone({ f: 70, f2: 35, type: 'sawtooth', d: 0.4, v: 0.08 * v }); },
+    shroom: v => { tone({ f: 220, f2: 50, type: 'sine', d: 0.3, v: 0.35 * v }); noise({ f: 900, f2: 300, q: 4, a: 0.01, d: 0.35, v: 0.25 * v }); for (let i = 0; i < 3; i++) tone({ f: rand(500, 1100), f2: rand(1200, 2000), type: 'sine', d: 0.06, v: 0.05 * v, t: ctx.currentTime + 0.05 + i * 0.05 }); },
+    hit: v => { noise({ type: 'highpass', f: 2500, d: 0.03, v: 0.1 * v }); tone({ f: 180, f2: 120, type: 'square', d: 0.03, v: 0.03 * v }); },
+    die: v => { tone({ f: rand(420, 520), f2: 110, type: 'triangle', d: 0.14, v: 0.14 * v }); noise({ f: 1400, f2: 500, q: 2, d: 0.12, v: 0.1 * v }); },
+    gem: (v, n) => { const f = mtof(76 + [0, 2, 4, 7, 9, 12, 14, 16][Math.min(7, n)]); tone({ f, type: 'sine', d: 0.12, v: 0.09 * v, echo: 0.25 }); tone({ f: f * 2, type: 'triangle', d: 0.05, v: 0.03 * v }); },
+    heal: v => { [72, 76, 79].forEach((m, i) => tone({ f: mtof(m), type: 'sine', d: 0.3, v: 0.12 * v, t: ctx.currentTime + i * 0.06, echo: 0.4 })); },
+    levelup: v => { [60, 64, 67, 72, 76, 79].forEach((m, i) => { tone({ f: mtof(m), type: 'triangle', d: 0.35, v: 0.12 * v, t: ctx.currentTime + i * 0.07, echo: 0.4 }); tone({ f: mtof(m + 12), type: 'sine', d: 0.25, v: 0.04 * v, t: ctx.currentTime + i * 0.07 }); });
+      noise({ type: 'highpass', f: 6000, a: 0.2, d: 0.5, v: 0.05 * v, t: ctx.currentTime + 0.3, echo: 0.5 }); },
+    hurt: v => { tone({ f: 160, f2: 55, type: 'sawtooth', d: 0.22, v: 0.22 * v }); noise({ type: 'lowpass', f: 900, d: 0.15, v: 0.3 * v }); },
+    eshot: v => { tone({ f: 520, f2: 260, type: 'square', d: 0.1, v: 0.035 * v }); },
+    boss: v => { const t = ctx.currentTime;
+      [33, 40].forEach(m => [-12, 9].forEach(dt => tone({ f: mtof(m), type: 'sawtooth', a: 1.2, d: 1.6, v: 0.12 * v, det: dt, t })));
+      [1, 2.4, 3.9, 5.3].forEach((h, i) => tone({ f: 98 * h, type: 'sine', a: 0.01, d: 3 / (i + 1), v: 0.18 * v / (i + 1), t: t + 0.9, echo: 0.5 }));
+      noise({ type: 'lowpass', f: 200, f2: 1200, a: 1.2, d: 0.8, v: 0.18 * v }); },
+    bossDie: v => { noise({ type: 'lowpass', f: 1200, f2: 80, a: 0.02, d: 1.6, v: 0.6 * v }); tone({ f: 110, f2: 30, type: 'sawtooth', d: 1.2, v: 0.2 * v }); [72, 76, 79, 84].forEach((m, i) => tone({ f: mtof(m), type: 'triangle', d: 0.6, v: 0.1 * v, t: ctx.currentTime + 0.5 + i * 0.1, echo: 0.5 })); },
+    over: v => { [69, 65, 62, 57, 53].forEach((m, i) => { tone({ f: mtof(m), type: 'triangle', a: 0.05, d: 1.1, v: 0.13 * v, t: ctx.currentTime + i * 0.28, echo: 0.6 }); tone({ f: mtof(m - 12), type: 'sine', a: 0.05, d: 1.2, v: 0.08 * v, t: ctx.currentTime + i * 0.28 }); }); },
+  };
+  // Límite de voces: cuántos sonidos iguales a la vez, separación mínima y volumen menor si se repiten
+  const LIMIT = { eye: [3, 0.05], moon: [3, 0.07], hit: [3, 0.045], die: [4, 0.04], gem: [3, 0.035], eshot: [2, 0.12], chess: [1, 0.2], portal: [2, 0.2], storm: [2, 0.08], shroom: [3, 0.08] };
+  let gemN = 0, gemT = 0; const lastStart = {};
+  function play(key) {
+    if (!ctx || muted || ctx.state !== 'running') return;
+    const now = ctx.currentTime, [max, gap] = LIMIT[key] || [4, 0], list = (voices[key] = (voices[key] || []).filter(t => t > now));
+    if (list.length >= max || now - (lastStart[key] !== undefined ? lastStart[key] : -9) < gap) return;
+    const v = 1 / (1 + list.length * 0.6);   // los repetidos suenan más bajo
+    if (key === 'gem') { gemN = now - gemT < 0.4 ? gemN + 1 : 0; gemT = now; FX.gem(v, gemN); } else FX[key](v);
+    list.push(now + 0.25); lastStart[key] = now;
+  }
+  // --- música: secuenciador por pasos de semicorchea ---
+  const CALM = { bpm: 70, chords: [[57, 60, 64, 71], [53, 57, 60, 64], [50, 53, 57, 62], [52, 56, 59, 62]] };          // Am9 · Fmaj7 · Dm · E7 (inquietante)
+  const BOSS = { bpm: 128, chords: [[45, 48, 52], [46, 49, 53], [45, 48, 52], [44, 47, 50]] };                         // Am · Bbm · Am · G#dim
+  let mode = null, step = 0, next = 0;
+  function music(m) {
+    if (!ctx) return; const t = ctx.currentTime;
+    for (const [bus, on] of [[calmBus, m === 'calm'], [bossBus, m === 'boss']]) { bus.gain.cancelScheduledValues(t); bus.gain.setValueAtTime(bus.gain.value, t); bus.gain.linearRampToValueAtTime(on ? 1 : 0, t + (on ? 1.5 : 1.2)); }
+    if (m && m !== mode) { step = 0; next = t + 0.1; }
+    mode = m;
+  }
+  function schedule() {
+    if (!ctx || !mode || ctx.state !== 'running') return;
+    if (next < ctx.currentTime - 0.1) next = ctx.currentTime + 0.05;   // tras una pausa no recupera pasos atrasados
+    while (next < ctx.currentTime + 0.3) { (mode === 'boss' ? bossStep : calmStep)(step, next); next += 60 / (mode === 'boss' ? BOSS.bpm : CALM.bpm) / 4; step++; }
+  }
+  function pad(notes, t, dur, out) {
+    for (const m of notes) for (const dt of [-8, 8]) {
+      const o = ctx.createOscillator(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+      o.type = 'sawtooth'; o.frequency.value = mtof(m); o.detune.value = dt; f.type = 'lowpass'; f.frequency.setValueAtTime(500, t); f.frequency.linearRampToValueAtTime(1100, t + dur * 0.5); f.frequency.linearRampToValueAtTime(500, t + dur);
+      g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.022, t + 1.2); g.gain.setValueAtTime(0.022, t + dur - 0.6); g.gain.linearRampToValueAtTime(0.0001, t + dur + 0.8);
+      o.connect(f); f.connect(g); g.connect(out); o.start(t); o.stop(t + dur + 0.9);
+    }
+  }
+  function calmStep(s, t) {
+    const bar = Math.floor(s / 16), ch = CALM.chords[Math.floor(bar / 2) % 4], beat = s % 32;
+    if (beat === 0) { pad(ch, t, 60 / CALM.bpm * 8, calmBus); tone({ f: mtof(ch[0] - 24), type: 'triangle', a: 0.4, d: 3.5, v: 0.14, t, out: calmBus }); }
+    if (beat === 16) tone({ f: mtof(ch[0] - 24), type: 'triangle', a: 0.3, d: 2.5, v: 0.1, t, out: calmBus });
+    if (s % 2 === 0 && Math.random() < 0.7) {   // campanitas de caja de música con eco
+      const pat = [0, 2, 1, 3, 2, 0, 3, 1], m = ch[pat[(s / 2) % 8]] + 12 + (Math.random() < 0.2 ? 12 : 0);
+      tone({ f: mtof(m), type: 'sine', d: 0.9, v: 0.045, t, out: calmBus, echo: 0.55 }); tone({ f: mtof(m) * 3.01, type: 'sine', d: 0.25, v: 0.008, t, out: calmBus });
+    }
+    if (s % 128 === 96) tone({ f: mtof(88), f2: mtof(74), type: 'sine', a: 1.5, d: 2.5, v: 0.03, t, out: calmBus, echo: 0.7 });   // silbido raro que cae
+  }
+  function bossStep(s, t) {
+    const bar = Math.floor(s / 16), ch = BOSS.chords[bar % 4], b = s % 16;
+    if (b % 4 === 0) { tone({ f: 150, f2: 42, type: 'sine', d: 0.22, v: 0.5, t, out: bossBus }); }                               // bombo
+    if (b === 4 || b === 12) noise({ f: 1800, q: 0.8, d: 0.14, v: 0.22, t, out: bossBus, echo: 0.2 });                         // palmada
+    if (b % 2 === 1) noise({ type: 'highpass', f: 7000, d: 0.03, v: 0.07, t, out: bossBus });                                   // charles
+    if (b % 2 === 0) tone({ f: mtof(ch[0] - 12 + (b === 14 ? 12 : 0)), type: 'sawtooth', d: 0.13, v: 0.11, t, out: bossBus });  // bajo insistente
+    if (b === 0) for (const m of ch) tone({ f: mtof(m + 12), type: 'square', a: 0.01, d: 0.5, v: 0.03, t, out: bossBus, echo: 0.3 });
+    const arp = [0, 1, 2, 1, 2, 0, 2, 1]; tone({ f: mtof(ch[arp[b % 8]] + 24), type: 'triangle', d: 0.1, v: 0.04, t, out: bossBus, echo: 0.25 });
+  }
+  function setMuted(m) {
+    muted = m; try { localStorage.setItem('pds_mute', m ? '1' : '0'); } catch (e) {}
+    if (ctx) { master.gain.cancelScheduledValues(ctx.currentTime); master.gain.setTargetAtTime(m ? 0 : 1.4, ctx.currentTime, 0.05); }
+  }
+  return {
+    init, play, music, setMuted, get muted() { return muted; },
+    pause(on) { if (!ctx) return; on ? ctx.suspend() : ctx.resume(); },
+  };
+})();
+// Botones de silencio (menú y partida), recuerdan la elección
+function refreshMute() { for (const id of ['muteBtn', 'muteBtn2']) { const b = $(id); b.innerHTML = icon(SND.muted ? 'mute' : 'sound'); b.setAttribute('aria-label', SND.muted ? 'Activar sonido' : 'Silenciar'); } }
+for (const id of ['muteBtn', 'muteBtn2']) $(id).onclick = e => { e.stopPropagation(); SND.setMuted(!SND.muted); refreshMute(); };
+refreshMute();
+addEventListener('keydown', e => { if (e.key === 'm' || e.key === 'M') { SND.setMuted(!SND.muted); refreshMute(); } });
 
 // ---------- Renderer / escena ----------
 const canvas = $('c');
@@ -1323,15 +1485,15 @@ function spawnBoss() {
   boss = spawnEnemy('boss');
   bossLight.intensity = 2.2;
   $('bosswrap').style.display = 'block';
-  banner('¡Despierta Helioth, el Sol que Sueña!', 3, 'sun');
+  banner('¡Despierta Helioth, el Sol que Sueña!', 3, 'sun'); SND.play('boss'); SND.music('boss');
 }
 function hurt(e, dmg) {
-  if (e.dead) return; e.hp -= dmg; e.hitT = 0.12;
+  if (e.dead) return; e.hp -= dmg; e.hitT = 0.12; SND.play('hit');
   if (e.hitA < -0.25) e.hitA = HIT_DUR;
   if (e.hp <= 0) kill(e);
 }
 function kill(e) {
-  e.dead = true; P.kills++;
+  e.dead = true; P.kills++; if (!e.def.boss) SND.play('die');
   const p = e.g.position;
   if (e.def.boss) dying.push({ g: e.g, t: 0 });
   else { e.g.scale.setScalar(e.sc); e.g.updateMatrix(); corpses.push({ rk: e.rk, m: e.g.matrix.clone(), t: 0 }); if (corpses.length > 160) corpses.shift(); }
@@ -1341,7 +1503,7 @@ function kill(e) {
     for (let i = 0; i < 20; i++) dropGem(p.x + rand(-3, 3), p.z + rand(-3, 3), 6);
     dropHeal(p.x, p.z);
     boss = null; bossCount++; nextBoss = time + 180; bossLight.intensity = 0; $('bosswrap').style.display = 'none';
-    banner('¡Has derrotado a Helioth! Sigue sobreviviendo…', 3, 'star');
+    banner('¡Has derrotado a Helioth! Sigue sobreviviendo…', 3, 'star'); SND.play('bossDie'); SND.music('calm');
     return;
   }
   dropGem(p.x, p.z, e.def.xp);
@@ -1360,17 +1522,19 @@ function enemiesNear(x, z, r) {
 }
 function hurtArea(x, z, r, dmg) { for (const e of enemiesNear(x, z, r + 0.3)) hurt(e, dmg); }
 function damagePlayer(d) {
-  P.hp -= d; P.inv = 0.85; mageUpper('hit');
+  P.hp -= d; P.inv = 0.85; mageUpper('hit'); SND.play('hurt');
   const f = $('dmgflash'); f.style.transition = 'none'; f.style.opacity = 1; requestAnimationFrame(() => { f.style.transition = 'opacity .35s'; f.style.opacity = 0; });
 }
 
 // ---------- Proyectiles, cristales, efectos ----------
 function fireBolt(from, tx, tz, dmg, pierce) {
+  SND.play('eye');
   const dx = tx - from.x, dz = tz - from.z, d = Math.hypot(dx, dz) || 1;
   const m = new THREE.Mesh(G.sph, M.bolt); m.scale.setScalar(0.2); m.position.set(from.x, 1.2, from.z); scene.add(m);
   bolts.push({ mesh: m, vx: dx / d * 18, vz: dz / d * 18, life: 1.3, dmg, pierce, hit: new Set(), enemy: false });
 }
 function enemyBolt(x, z, dx, dz, sp, dmg, y = 1.2) {
+  SND.play('eshot');
   const m = new THREE.Mesh(G.sph, M.ebolt); m.scale.setScalar(0.28); m.position.set(x, y, z); scene.add(m);
   bolts.push({ mesh: m, vx: dx * sp, vz: dz * sp, life: 4, dmg, enemy: true });
 }
@@ -1449,7 +1613,7 @@ function updatePowers(dt) {
       for (const e of enemies) {
         if (e.dead || e.moonCd > 0) continue;
         const dx = e.g.position.x - m.position.x, dz = e.g.position.z - m.position.z, d = Math.hypot(dx, dz);
-        if (d < e.r + 0.45) { hurt(e, dmg); e.moonCd = 0.45; if (!e.def.boss && d > 0) { e.g.position.x += dx / d * 0.5; e.g.position.z += dz / d * 0.5; } }
+        if (d < e.r + 0.45) { hurt(e, dmg); e.moonCd = 0.45; SND.play('moon'); if (!e.def.boss && d > 0) { e.g.position.x += dx / d * 0.5; e.g.position.z += dz / d * 0.5; } }
       }
     });
   }
@@ -1461,7 +1625,7 @@ function updatePowers(dt) {
       const size = 4.5 + pl.chess * 1.0;
       const m = new THREE.Mesh(G.plane, new THREE.MeshBasicMaterial({ map: checkerTex, transparent: true, opacity: 0, depthWrite: false }));
       m.rotation.x = -Math.PI / 2; m.position.set(P.pos.x, 0.06, P.pos.z); m.scale.set(size, size, 1); scene.add(m);
-      zones.push({ mesh: m, x: P.pos.x, z: P.pos.z, half: size / 2, life: 2.6, max: 2.6, tick: 0, dmg: (2 + 1.8 * pl.chess) * dm });
+      SND.play('chess'); zones.push({ mesh: m, x: P.pos.x, z: P.pos.z, half: size / 2, life: 2.6, max: 2.6, tick: 0, dmg: (2 + 1.8 * pl.chess) * dm });
     }
   }
   for (let i = zones.length - 1; i >= 0; i--) {
@@ -1483,7 +1647,7 @@ function updatePowers(dt) {
       const r = 2.6 + 0.5 * pl.portal;
       const m = new THREE.Mesh(G.circle, new THREE.MeshBasicMaterial({ map: spiralTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
       m.rotation.x = -Math.PI / 2; m.position.set(t.x, 0.08, t.z); m.scale.setScalar(0.01); scene.add(m);
-      portals.push({ mesh: m, x: t.x, z: t.z, r, life: 3.2, max: 3.2, tick: 0, dmg: (1.5 + 1.5 * pl.portal) * dm });
+      SND.play('portal'); portals.push({ mesh: m, x: t.x, z: t.z, r, life: 3.2, max: 3.2, tick: 0, dmg: (1.5 + 1.5 * pl.portal) * dm });
     }
   }
   for (let i = portals.length - 1; i >= 0; i--) {
@@ -1506,7 +1670,7 @@ function updatePowers(dt) {
       const c = enemiesNear(P.pos.x, P.pos.z, 15), n = 1 + Math.floor(pl.storm / 2);
       for (let i = 0; i < n && c.length; i++) {
         const e = c.splice(Math.floor(Math.random() * c.length), 1)[0], x = e.g.position.x, z = e.g.position.z;
-        lightning(x, z); hurtArea(x, z, 1.3, (12 + 7 * pl.storm) * dm);
+        lightning(x, z); SND.play('storm'); hurtArea(x, z, 1.3, (12 + 7 * pl.storm) * dm);
       }
     }
   }
@@ -1523,7 +1687,7 @@ function updatePowers(dt) {
   for (let i = shrooms.length - 1; i >= 0; i--) {
     const s = shrooms[i]; s.fuse -= dt; s.mesh.scale.setScalar(1 + (1.2 - s.fuse) * 0.6 + Math.sin(time * 30) * 0.05);
     if (s.fuse <= 0) {
-      hurtArea(s.x, s.z, s.r, s.dmg); burst(s.x, 0.4, s.z, 34, 0x8cff1a, s.r * 2.2, 3.5, 0.7); burst(s.x, 0.4, s.z, 10, 0xe8ff9a, s.r * 1.2, 5, 0.5);
+      hurtArea(s.x, s.z, s.r, s.dmg); SND.play('shroom'); burst(s.x, 0.4, s.z, 34, 0x8cff1a, s.r * 2.2, 3.5, 0.7); burst(s.x, 0.4, s.z, 10, 0xe8ff9a, s.r * 1.2, 5, 0.5);
       const b = new THREE.Mesh(G.sph, basicMat(0x66ff44, 0.6, true)); b.position.set(s.x, 0.3, s.z); b.scale.setScalar(0.4); addFx(b, 0.35, s.r, 0.6);
       scene.remove(s.mesh); shrooms.splice(i, 1);
     }
@@ -1538,6 +1702,7 @@ function addXP(v) {
 }
 let curOpts = [];
 function openLevelUp() {
+  SND.play('levelup');
   state = 'levelup'; hideJoy();
   const pool = [];
   for (const k in POWERS) { const l = P.powers[k] || 0; if (l < POWERS[k].max) pool.push({ kind: 'power', key: k, lvl: l + 1 }); }
@@ -1610,8 +1775,8 @@ const endJoy = e => { if (e.pointerId === joy.id) hideJoy(); };
 addEventListener('pointerup', endJoy); addEventListener('pointercancel', endJoy);
 
 function togglePause() {
-  if (state === 'play') { state = 'pause'; hideJoy(); $('pause').classList.remove('hidden'); }
-  else if (state === 'pause') { state = 'play'; $('pause').classList.add('hidden'); }
+  if (state === 'play') { state = 'pause'; hideJoy(); $('pause').classList.remove('hidden'); SND.pause(true); }
+  else if (state === 'pause') { state = 'play'; $('pause').classList.add('hidden'); SND.pause(false); }
 }
 $('pauseBtn').onclick = () => { if (state === 'play' || state === 'pause') togglePause(); };
 $('resumeBtn').onclick = togglePause;
@@ -1627,8 +1792,8 @@ $('resumeBtn').onclick = togglePause;
     btn.disabled = false; btn.textContent = txt;
   }).catch(err => { console.error(err); btn.textContent = 'Error al cargar'; });
 }
-$('playBtn').onclick = () => { reset(); $('start').classList.add('hidden'); $('hud').classList.remove('hidden'); state = 'play'; banner('Sobrevive al sueño morado…'); };
-$('againBtn').onclick = () => { reset(); $('over').classList.add('hidden'); state = 'play'; };
+$('playBtn').onclick = () => { SND.init(); SND.music('calm'); reset(); $('start').classList.add('hidden'); $('hud').classList.remove('hidden'); state = 'play'; banner('Sobrevive al sueño morado…'); };
+$('againBtn').onclick = () => { SND.init(); SND.music('calm'); reset(); $('over').classList.add('hidden'); state = 'play'; };
 document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'play') togglePause(); });
 
 function fmt(t) { const m = Math.floor(t / 60), s = Math.floor(t % 60); return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0'); }
@@ -1637,7 +1802,7 @@ function setBest(v) { try { localStorage.setItem('pds_best', v); } catch (e) {} 
 { const b = getBest(); if (b) $('best').innerHTML = icon('star') + 'Mejor sueño: ' + fmt(b); }
 
 function gameOver() {
-  state = 'over'; hideJoy(); player.visible = true; mageDie();
+  state = 'over'; hideJoy(); player.visible = true; mageDie(); SND.music(null); SND.play('over');
   const best = Math.max(getBest(), time); setBest(best);
   const row = (ic, k, v) => `<span class="k">${icon(ic)}${k}</span><b>${v}</b>`;
   $('overStats').innerHTML = row('haste', 'Tiempo', fmt(time)) + row('power', 'Nivel', P.lvl) + row('skull', 'Enemigos', P.kills) + row('star', 'Mejor sueño', fmt(best))
@@ -1750,6 +1915,7 @@ function update(dt) {
     if (gm.pull) { const s = Math.min(d, 16 * dt); m.position.x += dx / (d || 1) * s; m.position.z += dz / (d || 1) * s; }
     if (d < 0.7) {
       scene.remove(m); gems.splice(i, 1);
+      SND.play(gm.heal ? 'heal' : 'gem');
       if (gm.heal) P.hp = Math.min(P.maxHp, P.hp + gm.heal); else addXP(gm.val);
       if (state !== 'play') break;
     }
