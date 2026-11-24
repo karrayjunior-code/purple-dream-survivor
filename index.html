@@ -785,6 +785,7 @@ function charShader(sh, o = {}) {
     .replace('#include <common>', '#include <common>\nvarying vec3 vRest; varying vec2 vFx;' + NOISE_GLSL)
     .replace('#include <color_fragment>', `#include <color_fragment>
       ${o.mage ? STAR_GLSL : ''}
+      ${o.grain ? 'diffuseColor.rgb *= 0.78 + 0.22 * n3(vRest * 38.0) + 0.18 * n3(vRest * 9.0);' : ''}
       ${o.decor ? '' : `float mot = n3(vRest * 11.0) * 0.55 + n3(vRest * 29.0) * 0.45;
       diffuseColor.rgb *= mix(1.0, 0.4 + 1.1 * mot, 1.0 - vFx.x);`}`)
     .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
@@ -797,7 +798,7 @@ function charShader(sh, o = {}) {
         totalEmissiveRadiance += VEIN_COLOR * vein * vFx.y;
         diffuseColor.rgb *= 1.0 - vein * 0.5;
       }`)
-    .replace('RIM_COLOR', o.mage ? 'vec3(0.85, 0.9, 1.25) * 2.0' : 'mix(vec3(0.1, 0.3, 1.0), vec3(0.75, 0.15, 1.0), clamp(normal.y * 0.5 + 0.5, 0.0, 1.0)) * 1.1')
+    .replace('RIM_COLOR', o.mage ? 'vec3(0.85, 0.9, 1.25) * 2.0' : 'mix(vec3(0.1, 0.3, 1.0), vec3(0.75, 0.15, 1.0), clamp(normal.y * 0.5 + 0.5, 0.0, 1.0)) * ' + (o.rimK || 1.1).toFixed(2))
     .replace('VEIN_COLOR', o.vein || 'vec3(0.35, 0.55, 1.6)').replace(/VEIN_SCALE/g, (o.veinScale || 1).toFixed(2));
 }
 const STAR_GLSL = `{ vec3 cc = diffuseColor.rgb; float mx = max(max(cc.r, cc.g), cc.b), mn = min(min(cc.r, cc.g), cc.b);
@@ -930,51 +931,70 @@ const PROC = {
 };
 // Jefe Helioth, el Sol que Sueña (modelo único, no instanciado): rostro esculpido de piedra de fuego con venas de lava
 const bossMat = charMat.clone();
-bossMat.onBeforeCompile = sh => charShader(sh, { vein: 'vec3(2.4, 1.0, 0.1)', veinScale: 0.55 });
+bossMat.onBeforeCompile = sh => charShader(sh, { vein: 'vec3(2.4, 1.0, 0.1)', veinScale: 0.55, rimK: 0.3 });
+// La cara usa sombreado suave (normales reales) para que el relieve esculpido se lea como piedra modelada
+const faceMat = charMat.clone(), uOpen = { value: 0 }; faceMat.flatShading = false; faceMat.shininess = 6; faceMat.specular.set(0x1a0804);
+faceMat.onBeforeCompile = sh => {
+  charShader(sh, { vein: 'vec3(2.4, 1.0, 0.1)', veinScale: 0.55, decor: true, grain: true, rimK: 0.35 }); sh.uniforms.uOpen = uOpen;
+  sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float aJaw; uniform float uOpen;')
+    .replace('vRest = rest; vFx = fx;', 'vRest = rest; vFx = fx; transformed.y -= aJaw * uOpen * 0.34; transformed.z -= aJaw * uOpen * 0.1;');
+};
 const HR = 2.1, HZ = 0.86;                                                   // radio de la cabeza y aplanado de la cara
 const gauss = (x, y, cx, cy, sx, sy) => Math.exp(-((x - cx) * (x - cx)) / (2 * sx * sx) - ((y - cy) * (y - cy)) / (2 * sy * sy));
 // Relieve del rostro en coordenadas de cara (x, y en [-1, 1] mirando a +Z). Devuelve el desplazamiento radial.
+const mouthY = x => -0.38 - 0.9 * x * x - 2.2 * Math.pow(Math.abs(x), 3);   // comisuras que caen                                     // línea de la boca con las comisuras hacia abajo
 function faceRelief(x, y, front) {
   if (front <= 0) return 0;
   const w = Math.min(1, front * 2.2) * 1.3;
   let d = 0;
-  d += 0.06 * gauss(x, y, 0, 0.55, 0.45, 0.2);                                 // frente abombada
-  d += 0.13 * gauss(x, y, 0, 0.3, 0.42, 0.055) * (1 - Math.min(1, Math.abs(x) / 0.62));   // cejas marcadas (arco)
-  d -= 0.05 * gauss(x, y, 0, 0.33, 0.06, 0.05);                                // entrecejo fruncido
+  d += 0.05 * gauss(x, y, 0, 0.58, 0.5, 0.2);                                  // frente
+  d += 0.15 * gauss(x, y, 0, 0.3, 0.46, 0.06) * (1 - Math.min(1, Math.abs(x) / 0.66));   // arco de las cejas, pesado
+  d -= 0.04 * gauss(x, y, 0, 0.34, 0.05, 0.05);                                // entrecejo
   for (const s of [-1, 1]) {
-    d -= 0.2 * gauss(x, y, 0.29 * s, 0.13, 0.13, 0.1);                         // cuencas de los ojos
-    d += 0.055 * gauss(x, y, 0.3 * s, -0.04, 0.11, 0.045);                     // bolsas bajo los ojos
-    d += 0.11 * gauss(x, y, 0.47 * s, -0.1, 0.13, 0.12);                       // pómulos
-    d -= 0.05 * gauss(x, y, 0.33 * s, -0.33, 0.07, 0.16);                      // surcos junto a la boca
-    d -= 0.09 * gauss(x, y, 0.075 * s, -0.17, 0.028, 0.022);                   // orificios de la nariz
-    d += 0.09 * gauss(x, y, 0.085 * s, -0.135, 0.05, 0.04);                    // aletas de la nariz
+    d -= 0.26 * gauss(x, y, 0.29 * s, 0.13, 0.15, 0.09);                       // cuencas hundidas
+    d += 0.07 * gauss(x, y, 0.3 * s, 0.215, 0.13, 0.03);                       // pliegue del párpado bajo la ceja
+    d += 0.06 * gauss(x, y, 0.3 * s, -0.03, 0.12, 0.04);                       // bolsas bajo los ojos
+    d += 0.12 * gauss(x, y, 0.5 * s, -0.08, 0.13, 0.13);                       // pómulos anchos, apartados de la boca
+    d -= 0.035 * gauss(x, y, 0.3 * s, -0.42, 0.03, 0.16);                      // surcos rectos hacia la barbilla
+    d -= 0.07 * gauss(x, y, 0.3 * s, -0.6, 0.045, 0.05);                       // comisuras hundidas y caídas
+    d += 0.11 * gauss(x, y, 0.105 * s, -0.16, 0.06, 0.05);                     // aletas de la nariz, anchas
+    d -= 0.07 * gauss(x, y, 0.09 * s, -0.205, 0.03, 0.02);                     // orificios
   }
-  d += 0.3 * gauss(x, y, 0, 0.02, 0.055, 0.2) * (0.35 + 0.65 * Math.min(1, Math.max(0, (0.28 - y) / 0.4)));   // nariz grande (crece hacia la punta)
-  d += 0.14 * gauss(x, y, 0, -0.11, 0.08, 0.06);                               // punta de la nariz
-  d -= 0.04 * gauss(x, y, 0, -0.4, 0.2, 0.08);                                 // hueco de la boca
-  d += 0.1 * gauss(x, y, 0, -0.66, 0.2, 0.1);                                  // barbilla
+  d += 0.17 * gauss(x, y, 0, 0.04, 0.085, 0.16) * (0.4 + 0.6 * Math.min(1, Math.max(0, (0.25 - y) / 0.35)));   // puente ancho de la nariz
+  d += 0.17 * gauss(x, y, 0, -0.14, 0.12, 0.075);                              // punta redondeada, como de piedra
+  // labios gruesos integrados en la superficie, con la boca cerrada y las comisuras caídas
+  const ly = y - mouthY(x), lw = Math.max(0, 1 - Math.pow(Math.abs(x) / 0.31, 2.2));
+  d += 0.085 * gauss(0, ly, 0, 0.045, 1, 0.035) * lw * (1 + 0.25 * gauss(x, 0, 0.06, 0, 0.05, 1) + 0.25 * gauss(x, 0, -0.06, 0, 0.05, 1));   // labio de arriba
+  d += 0.085 * gauss(0, ly, 0, -0.045, 1, 0.035) * lw;                          // labio de abajo, carnoso
+  d -= 0.045 * gauss(0, ly, 0, 0.0, 1, 0.012) * Math.max(0, 1 - Math.abs(x) / 0.3);   // línea entre los labios
+  d -= 0.04 * gauss(x, y, 0, -0.27, 0.05, 0.035);                              // surco bajo la nariz
+  d += 0.1 * gauss(x, y, 0, -0.7, 0.2, 0.1);                                   // barbilla
   return d * w;
 }
+const lipAmount = (x, y) => { const ly = y - mouthY(x), lw = Math.max(0, 1 - Math.pow(Math.abs(x) / 0.32, 2.2)); return lw * Math.max(gauss(0, ly, 0, 0.045, 1, 0.04), gauss(0, ly, 0, -0.05, 1, 0.05)); };
+const jawAmount = (x, y) => { const ly = y - mouthY(x); return ly >= -0.005 ? 0 : Math.min(1, -ly / 0.03) * gauss(x, y, 0, -0.55, 0.24, 0.16); };
 // Punto de la superficie (en el espacio de la cabeza) para unas coordenadas de cara
 function facePoint(x, y, out = new THREE.Vector3()) {
   const z = Math.sqrt(Math.max(0, 1 - x * x - y * y)), r = HR * (1 + faceRelief(x, y, z));
   return out.set(x * r, y * r, z * r * HZ);
 }
 function buildFaceGeo() {
-  const g = new THREE.SphereGeometry(1, 72, 54), p = g.attributes.position, n = p.count;
-  const col = new Float32Array(n * 3), fx = new Float32Array(n * 2), c1 = new THREE.Color(0x4a0600), c2 = new THREE.Color(0xd83800), c3 = new THREE.Color(0xff7a1a), tmp = new THREE.Color();
+  const g = new THREE.SphereGeometry(1, 104, 78), p = g.attributes.position, n = p.count;
+  const col = new Float32Array(n * 3), fx = new Float32Array(n * 2), jaw = new Float32Array(n), c1 = new THREE.Color(0x2a0300), c2 = new THREE.Color(0xc23400), c3 = new THREE.Color(0xf06a18), lip = new THREE.Color(0x9a0a1a), tmp = new THREE.Color();
   for (let i = 0; i < n; i++) {
     const x = p.getX(i), y = p.getY(i), z = p.getZ(i), d = faceRelief(x, y, z);
-    const ham = (vn2(x * 9 + 3, y * 9 + z * 7) - 0.5) * 0.035 + (vn2(x * 23, y * 23 + z * 19 + 5) - 0.5) * 0.015;   // metal martillado
+    const ham = (vn2(x * 9 + 3, y * 9 + z * 7) - 0.5) * 0.02 + (vn2(x * 31, y * 31 + z * 23 + 5) - 0.5) * 0.012;   // piedra / metal martillado
     const r = HR * (1 + d + ham);
     p.setXYZ(i, x * r, y * r, z * r * HZ);
     const k = Math.min(1, Math.max(0, (d + 0.12) / 0.3)), top = 0.5 + y * 0.5;
-    tmp.copy(c1).lerp(c2, Math.min(1, k * 1.4)).lerp(c3, Math.max(0, k - 0.55) * 1.6 + top * 0.15);
+    tmp.copy(c1).lerp(c2, Math.min(1, k * 1.4)).lerp(c3, Math.max(0, k - 0.55) * 1.6 + top * 0.15).lerp(lip, z > 0 ? Math.min(1, lipAmount(x, y) * 2.4) : 0);
+    jaw[i] = z > 0 ? jawAmount(x, y) : 0;
     const m = 0.8 + vn2(x * 14 + 11, y * 14 + z * 9) * 0.4; col[i * 3] = tmp.r * m; col[i * 3 + 1] = tmp.g * m; col[i * 3 + 2] = tmp.b * m;
     fx[i * 2 + 1] = z > 0.35 ? 0.18 : z > 0.1 ? 0.6 : 1;                           // venas de lava sobre todo en los lados y detrás: la cara se lee limpia
   }
-  g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setAttribute('fx', new THREE.BufferAttribute(fx, 2)); g.setAttribute('rest', g.attributes.position);
-  g.deleteAttribute('normal'); g.deleteAttribute('uv');
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setAttribute('fx', new THREE.BufferAttribute(fx, 2)); g.setAttribute('rest', g.attributes.position.clone());
+  g.setAttribute('aJaw', new THREE.BufferAttribute(jaw, 1));
+  g.deleteAttribute('uv'); g.computeVertexNormals();
   return g;
 }
 // Llamaradas: conos fusionados con un shader de fuego que ondula y parpadea
@@ -1018,31 +1038,27 @@ function buildFlames() {
 }
 function buildBoss() {
   const g = new THREE.Group(), h = new THREE.Group(); h.position.y = 3.4; g.add(h); g.userData.float = h; g.userData.fy = 3.4;
-  h.add(new THREE.Mesh(buildFaceGeo(), bossMat));
+  h.add(new THREE.Mesh(buildFaceGeo(), faceMat));
   const rays = new THREE.Mesh(buildFlames(), flameMat); rays.frustumCulled = false; h.add(rays); g.userData.rays = rays;
   // Ojos: globo pálido con iris de fuego que sigue al jugador; párpados pesados que parpadean despacio
   let R = Rig();
-  R.fx(0.45).add(CG.sph, 0xfff0d0, 0.34, 0.34, 0.34, 0, 0, 0, 0, 0, 0, 0.3);
-  R.fx(1).add(CG.sph, 0xff7a00, 0.19, 0.19, 0.08, 0, 0, 0.29, 0, 0, 0, 0.4);
-  R.fx(0).add(CG.sph, 0x0a0002, 0.095, 0.1, 0.05, 0, 0, 0.345, 0, 0, 0, 0);
+  R.fx(0).add(CG.sph, 0x5a3438, 0.3, 0.3, 0.3, 0, 0, 0, 0, 0, 0, 0.3);
+  R.fx(0).add(CG.sph, 0x1a0812, 0.2, 0.2, 0.08, 0, 0, 0.255, 0, 0, 0, 0.2);
+  R.add(CG.sph, 0x050002, 0.1, 0.1, 0.05, 0, 0, 0.3, 0, 0, 0, 0);
   const eyeGeo = mergeParts(R.parts);
-  R = Rig(); R.add(CG.half, 0xb02a00, 0.385, 0.385, 0.385, 0, 0, 0, 0, 0, 0, 0.5); R.add(CG.cyl, 0x3a0400, 0.385, 0.05, 0.385, 0, 0.01, 0, 0, 0, 0, 0);
+  R = Rig(); R.add(CG.half, 0xa82800, 0.335, 0.36, 0.335, 0, 0, 0, 0, 0, 0, 0.6); R.add(CG.cyl, 0x2a0200, 0.34, 0.07, 0.34, 0, 0.0, 0, 0, 0, 0, 0);
   const lidGeo = mergeParts(R.parts);
   g.userData.eyes = []; g.userData.lids = [];
   for (const s of [-1, 1]) {
-    const socket = new THREE.Group(); facePoint(0.29 * s, 0.13, socket.position); socket.position.z -= 0.12; h.add(socket);
+    const socket = new THREE.Group(); facePoint(0.29 * s, 0.13, socket.position); socket.position.z -= 0.14; socket.scale.set(1.45, 0.85, 1); socket.rotation.z = s * 0.08; h.add(socket);
     const eye = new THREE.Mesh(eyeGeo, bossMat); socket.add(eye); g.userData.eyes.push(eye);
     const lid = new THREE.Mesh(lidGeo, bossMat); socket.add(lid); g.userData.lids.push(lid);
   }
-  // Labios gruesos y rojos; el de abajo baja al abrir la boca antes de cada ataque
-  const mouth = new THREE.Group(); facePoint(0, -0.4, mouth.position); mouth.position.z -= 0.02; h.add(mouth);
-  R = Rig(); R.add(CG.sph, 0x1a0004, 0.5, 0.2, 0.15, 0, -0.04, -0.06, 0, 0, 0, 0);
+  // Interior oscuro de la boca, detrás de los labios esculpidos: se ve cuando la mandíbula baja
+  const mouth = new THREE.Group(); facePoint(0, mouthY(0), mouth.position); mouth.position.z -= 0.16; h.add(mouth);
+  R = Rig(); R.add(CG.sph, 0x0a0002, 0.42, 0.2, 0.12, 0, -0.08, 0, 0, 0, 0, 0);
   mouth.add(new THREE.Mesh(mergeParts(R.parts), bossMat));
-  R = Rig(); R.fx(0.05).add(CG.sph, 0xa00818, 0.58, 0.14, 0.22, 0, 0.08, 0, 0.15, 0, 0, 0.5).add(CG.sph, 0xb80c20, 0.24, 0.1, 0.18, 0, 0.12, 0.05, 0, 0, 0, 0.3);
-  const upper = new THREE.Mesh(mergeParts(R.parts), bossMat); mouth.add(upper);
-  R = Rig(); R.fx(0.05).add(CG.sph, 0x980614, 0.52, 0.17, 0.23, 0, -0.1, 0, -0.1, 0, 0, 0.5);
-  const lower = new THREE.Mesh(mergeParts(R.parts), bossMat); mouth.add(lower);
-  Object.assign(g.userData, { lowerLip: lower, mouthOpen: 0, blinkT: rand(2, 5), blink: 0 });
+  Object.assign(g.userData, { mouthOpen: 0, blinkT: rand(2, 5), blink: 0 });
   return g;
 }
 // Animación sutil del jefe: llamaradas, parpadeo lento, mirada hacia el jugador y boca antes de atacar
@@ -1051,15 +1067,15 @@ function animBoss(g, e, dt) {
   const u = g.userData; flameMat.uniforms.uTime.value = time;
   u.blinkT -= dt; if (u.blinkT <= 0) { u.blink = 0.45; u.blinkT = rand(3, 6.5); }
   let close = 0; if (u.blink > 0) { u.blink -= dt; close = Math.sin(Math.max(0, u.blink) / 0.45 * Math.PI); }
-  const lidA = -0.22 + Math.sin(time * 0.7) * 0.04 + close * 0.95;            // párpados pesados, medio cerrados
+  const lidA = 0.38 + Math.sin(time * 0.5) * 0.03 + close * 0.6;             // párpados muy pesados, casi cerrados
   for (const l of u.lids) l.rotation.x = lidA;
   _look.set(P.pos.x, 1.4, P.pos.z);
   for (const eye of u.eyes) {
     eye.lookAt(_look); _eul.setFromQuaternion(eye.quaternion, 'YXZ');
-    eye.rotation.set(Math.max(-0.5, Math.min(0.55, _eul.x)), Math.max(-0.5, Math.min(0.5, _eul.y)), 0, 'YXZ');
+    eye.rotation.set(Math.max(-0.35, Math.min(0.4, _eul.x)), Math.max(-0.3, Math.min(0.3, _eul.y)), 0, 'YXZ');   // mirada fría, se mueve poco
   }
-  u.mouthOpen += ((e.shootT < 0.7 ? 1 - e.shootT / 0.7 : 0) - u.mouthOpen) * Math.min(1, dt * 10);
-  u.lowerLip.position.y = -u.mouthOpen * 0.3; u.lowerLip.rotation.x = u.mouthOpen * 0.3;
+  u.mouthOpen += ((e.shootT < 1.2 ? 1 - e.shootT / 1.2 : 0) - u.mouthOpen) * Math.min(1, dt * 2.5);   // se abre lenta antes de atacar
+  uOpen.value = u.mouthOpen;
 }
 const B = { boss: buildBoss };
 
@@ -1992,7 +2008,7 @@ function update(dt) {
     if (e.def.boss) {
       g.userData.float.position.y = g.userData.fy + Math.sin(time * 3 + e.ph) * 0.25;
       animBoss(g, e, dt);
-      bossMat.emissive.setScalar(e.hitT > 0 ? 0.45 : 0);
+      bossMat.emissive.setScalar(e.hitT > 0 ? 0.45 : 0); faceMat.emissive.copy(bossMat.emissive);
     } else e.hitA -= dt;
     if (e.hitT > 0) { e.hitT -= dt; g.scale.setScalar(e.sc * (1 + e.hitT * 2)); } else g.scale.setScalar(e.sc);
     if (d < e.r + 0.5 && P.inv <= 0) damagePlayer(e.dmg);
