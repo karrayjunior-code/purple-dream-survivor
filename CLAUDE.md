@@ -92,9 +92,16 @@ Sacada de capturas de la tendencia "old dark fantasy" (CGI de finales de los 90)
 - Partículas de hechizos: un único sistema de puntos aditivos (`emit`/`burst`): estelas de proyectiles, chispas de lunas, remolino del portal, destellos de rayos, ácido de setas, brillo del ajedrez y al morir enemigos.
 - Sonido (módulo `SND`): todo sintetizado con Web Audio, sin archivos. Efectos por poder, golpes, muertes, cristales (suben de tono en racha), subir de nivel, daño, Helioth y game over; música en bucle por secuenciador (tranquila 70 bpm inquietante y otra de jefe 128 bpm, con fundido). Límite de voces por sonido, eco compartido y compresor. Arranca al pulsar "Jugar"; se suspende en pausa; botón de silencio (y tecla M) recordado en `localStorage`.
 - Los enemigos aparecen siempre fuera de la vista (`spawnPoint`: comprueba el campo de visión) o dentro de la niebla al frente.
+- **Diseño y plan por fases:** `docs/DISENO.md` (referencia para todo lo nuevo). Fase 1 hecha.
+- **Datos (`DB` en `index.html`):** 16 poderes (6 activos), 12 reliquias (5 activas), 12 objetos especiales (solo datos hasta la Fase 4), bolitas de experiencia, curvas de dificultad e inventario 6 + 6. `active: false` = definido pero aún no implementado.
+- **Equilibrio (`DB.balance`):** vida del jugador 100, fórmula de exp por nivel `10 + 11·nivel + 0,08·nivel²` (nivel ≈ 15/30/45 en los minutos 5/10/15), Helioth a las 2:30 con 930 de vida, 10 de daño por contacto y disparos de 6; encapuchados: disparo 5, cada 4-6 s, alcance 12, velocidad 6. Oleadas: ojos 0:30, gnomos 1:00, esqueletos 2:00, encapuchados 4:00.
+- **Curvas (`DB.curve`, t en minutos):** vida de enemigos 1 + 0,12t + 0,012t² (×1,15 por minuto pasado el 15), daño 1 + 0,06t, velocidad +2%/min (tope +30%), enemigos a la vez 30 → 150 (min 5) → 300 (min 10) → 400 (min 15).
+- **Bolitas de exp:** 1 cian, 5 morada, 25 oro y 100 roja con aura (la suelta Helioth junto a 4 de 25). Vuelan con estela; con 300 en el suelo, las nuevas se funden con la más lejana.
+- **Pausa:** muestra la build (6 huecos de poderes y 6 de reliquias), tiempo, nivel, enemigos y vida. La pantalla de muerte añade jefes derrotados y el reparto de daño por poder.
+- **Simulador:** `index.html?sim=50` juega 50 partidas sin dibujar con un bot (círculo de radio 20, se acerca a bolitas cercanas y se aparta de enemigos pegados, mejoras al azar) y muestra minuto de muerte, nivel y DPS por minuto, tiempo de combate con Helioth (desde el primer golpe), reparto de daño y daño recibido por fuente. Parámetros: `&r=` radio, `&avoid=` evasión, `&min=` minuto de corte, `&bal={...}` para probar otros valores de `DB.balance`.
 - Publicado con GitHub Pages: https://karrayjunior-code.github.io/purple-dream-survivor/
-- Implementado: 6 poderes, 5 pasivas, 6 tipos de enemigo, jefe Helioth a los 2:30, joystick táctil, pausa, mejor tiempo guardado.
-- Pendiente: resto de jefes, balance de dificultad, SDK de CrazyGames.
+- Implementado: 6 poderes, 5 reliquias, 6 tipos de enemigo, jefe Helioth a las 2:30 (pasará al minuto 5 en la Fase 4), joystick táctil, pausa con build, mejor tiempo guardado, simulador.
+- Pendiente: Fases 2-9 de `docs/DISENO.md` (poderes nuevos, evoluciones, élites, jefes, personajes, progresión, escenarios, pulido, CrazyGames).
 
 ## Diseño completo
 - El plan del juego completo (poderes, evoluciones, fusiones, Dones, jefes, cofres, personajes, árbol de mejoras, escenarios) está en `docs/DISENO.md`, dividido en 9 fases. Cada fase se pide por número; si algo no encaja con el código, propón antes de hacerlo.

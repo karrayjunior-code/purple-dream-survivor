@@ -261,3 +261,7 @@ Fórmulas: vida = 1 + 0,12·t + 0,012·t²; daño = 1 + 0,06·t; velocidad +2% p
 7. **Escenarios 2, 3 y 4:** uno por prompt.
 8. **Pulido:** animaciones, sensación de golpe, números de daño y ajuste final del equilibrio. Cada fase anterior ya revisa sus números con el simulador.
 9. **CrazyGames:** SDK, anuncios con recompensa (revivir), guardado en la nube y envío.
+
+## Estado
+
+- **Fase 1 (hecha):** tablas de datos (`DB`), inventario 6 + 6, pausa con la build, bolitas de 1/5/25/100, curvas de dificultad y modo `?sim`. Diferencias provisionales con este documento: Helioth sigue a las 2:30 hasta la Fase 4 (vida ajustada para matarlo en ~45-60 s con la build de ese minuto); los poderes mantienen sus niveles actuales (5-6) hasta la Fase 2; las oleadas se retrasan para que los 2 primeros minutos sean tranquilos (esqueletos 2:00, encapuchados 4:00). Con solo un jefe, el bot que sobrevive a Helioth suele llegar al minuto 15: la presión del final llegará con élites y jefes (Fases 3 y 4).

@@ -106,6 +106,24 @@
     .card .key{display:none}
   }
 
+  /* Build en la pausa: 6 huecos de poderes y 6 de reliquias */
+  .build{padding:14px 18px;display:flex;flex-direction:column;gap:10px;max-width:min(560px,92vw)}
+  .build .row{display:flex;flex-direction:column;gap:6px}
+  .build .ttl{font-family:'Pira';font-size:20px;color:var(--goldl);text-align:left;text-shadow:0 2px 0 var(--ink)}
+  .build .slots{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+  .build .slot{position:relative;aspect-ratio:1;min-width:40px;display:grid;place-items:center;background:rgba(18,4,31,.7);box-shadow:0 0 0 2px var(--ink),0 0 0 3px #5a22b4}
+  .build .slot.empty{opacity:.35}
+  .build .slot .ico{width:62%;height:62%}
+  .build .slot i{position:absolute;right:3px;bottom:1px;font-style:normal;font-size:15px;color:var(--goldl);text-shadow:1px 1px 0 var(--ink)}
+  .build .info{font-size:18px;color:#cbb2f5;text-align:left;line-height:1.2}
+  .build .info b{font-weight:400;color:var(--goldl)}
+  .dmgrows{grid-column:1/-1;display:flex;flex-direction:column;gap:3px;margin-top:4px;font-size:18px}
+  .dmgrow{display:grid;grid-template-columns:20px 1fr 44px;gap:8px;align-items:center}
+  .dmgrow .ico{width:18px;height:18px}
+  .dmgrow .bar2{height:8px;background:var(--ink);box-shadow:0 0 0 1px #5a22b4}
+  .dmgrow .bar2>div{height:100%;background:linear-gradient(90deg,var(--violet),var(--gold))}
+  .dmgrow span{text-align:right;color:var(--goldl)}
+
   /* Créditos */
   .linkbtn{pointer-events:auto;background:none;border:0;cursor:pointer;font-family:'Pix',monospace;font-size:20px;color:#cbb2f5;text-decoration:underline;text-underline-offset:4px;text-shadow:0 2px 0 var(--ink);padding:2px 8px}
   .linkbtn:hover{color:var(--goldl)}
@@ -178,6 +196,7 @@
 
 <div id="pause" class="overlay hidden">
   <h2>Pausa</h2>
+  <div class="build frame" id="buildBox"></div>
   <button class="btn" id="resumeBtn">Seguir</button>
 </div>
 
@@ -1374,10 +1393,10 @@ const ETYPES = {
 };
 const WAVES = [
   { t: 0, type: 'goblin', w: 4 },
-  { t: 25, type: 'eye', w: 3, ic: 'eye', msg: 'Los ojos te observan…' },
-  { t: 50, type: 'gnome', w: 2.5, ic: 'gnome', msg: 'Llegan los gnomos raros…' },
-  { t: 80, type: 'skeleton', w: 2, ic: 'skull', msg: 'Los esqueletos despiertan…' },
-  { t: 110, type: 'hooded', w: 1.5, ic: 'hood', msg: 'Los encapuchados rojos se acercan…' },
+  { t: 30, type: 'eye', w: 3, ic: 'eye', msg: 'Los ojos te observan…' },
+  { t: 60, type: 'gnome', w: 2.5, ic: 'gnome', msg: 'Llegan los gnomos raros…' },
+  { t: 120, type: 'skeleton', w: 2, ic: 'skull', msg: 'Los esqueletos despiertan…' },
+  { t: 240, type: 'hooded', w: 1, ic: 'hood', msg: 'Los encapuchados rojos se acercan…' },
 ];
 
 // ---------- Enemigos instanciados con animación horneada ----------
@@ -1621,26 +1640,81 @@ function spawnPoint() {
   return [P.pos.x + cx * d, P.pos.z + cz * d];
 }
 
-// ---------- Poderes ----------
-const POWERS = {
-  eye:    { ic: 'eye', name: 'Ojo vigilante', max: 6, desc: 'Un ojo flotante dispara rayos al enemigo más cercano.', up: 'Dispara más rápido, más daño y atraviesa enemigos.' },
-  moons:  { ic: 'moons', name: 'Lunas orbitales', max: 5, desc: 'Lunas que giran a tu alrededor y golpean todo lo que tocan.', up: '+1 luna y más daño.' },
-  chess:  { ic: 'chess', name: 'Suelo de ajedrez', max: 5, desc: 'Aparece un tablero bajo tus pies que daña y ralentiza.', up: 'Tablero más grande y más frecuente.' },
-  portal: { ic: 'portal', name: 'Portal galáctico', max: 5, desc: 'Una espiral de estrellas absorbe y tritura enemigos.', up: 'Portal más grande y más fuerte.' },
-  storm:  { ic: 'storm', name: 'Tormenta morada', max: 5, desc: 'Caen rayos morados sobre enemigos cercanos.', up: 'Más rayos y más daño.' },
-  shroom: { ic: 'shroom', name: 'Champiñón de ácido', max: 5, desc: 'Dejas setas que explotan en ácido verde.', up: 'Explosión más grande y más daño.' },
+// ---------- Base de datos del juego (ver docs/DISENO.md) ----------
+// active: false = definido en el diseño pero todavía no implementado (no aparece en partida).
+// Las escuelas de magia agrupan los poderes; las reliquias son las pasivas.
+const DB = {
+  schools: { sueno: 'Sueño', vacio: 'Vacío', pantano: 'Pantano', fuego: 'Fuego' },
+  powers: {
+    eye:     { active: true,  school: 'sueno',   ic: 'eye',    name: 'Ojo vigilante',       max: 6, desc: 'Un ojo flotante dispara rayos al enemigo más cercano.', up: 'Dispara más rápido, más daño y atraviesa enemigos.', relic: 'twin' },
+    moons:   { active: true,  school: 'sueno',   ic: 'moons',  name: 'Lunas orbitales',     max: 5, desc: 'Lunas que giran a tu alrededor y golpean todo lo que tocan.', up: '+1 luna y más daño.', relic: 'candle' },
+    chess:   { active: true,  school: 'sueno',   ic: 'chess',  name: 'Suelo de ajedrez',    max: 5, desc: 'Aparece un tablero bajo tus pies que daña y ralentiza.', up: 'Tablero más grande y más frecuente.', relic: 'haste' },
+    bell:    { active: false, school: 'sueno',                 name: 'Campana del sueño',   max: 7, desc: 'Onda circular que aturde 1 s.' },
+    portal:  { active: true,  school: 'vacio',   ic: 'portal', name: 'Portal galáctico',    max: 5, desc: 'Una espiral de estrellas absorbe y tritura enemigos.', up: 'Portal más grande y más fuerte.', relic: 'magnet' },
+    storm:   { active: true,  school: 'vacio',   ic: 'storm',  name: 'Tormenta morada',     max: 5, desc: 'Caen rayos morados sobre enemigos cercanos.', up: 'Más rayos y más daño.', relic: 'power' },
+    stars:   { active: false, school: 'vacio',                 name: 'Lluvia de estrellas', max: 7, desc: 'Meteoritos que caen en zonas al azar.', relic: 'lens' },
+    mirror:  { active: false, school: 'vacio',                 name: 'Espejo roto',         max: 7, desc: 'Abanico de fragmentos hacia donde caminas.' },
+    shroom:  { active: true,  school: 'pantano', ic: 'shroom', name: 'Champiñón de ácido',  max: 5, desc: 'Dejas setas que explotan en ácido verde.', up: 'Explosión más grande y más daño.', relic: 'chalice' },
+    ivy:     { active: false, school: 'pantano',               name: 'Hiedra de espinas',   max: 7, desc: 'Deja un rastro de espinas al andar.' },
+    moths:   { active: false, school: 'pantano',               name: 'Mariposas nocturnas', max: 7, desc: 'Enjambre que persigue y muerde.' },
+    skull:   { active: false, school: 'pantano',               name: 'Calavera aullante',   max: 7, desc: 'Calavera que atraviesa filas y empuja.' },
+    lava:    { active: false, school: 'fuego',                 name: 'Bola de lava',        max: 7, desc: 'Bola que rebota entre enemigos y quema.', relic: 'scale' },
+    lantern: { active: false, school: 'fuego',                 name: 'Linterna de almas',   max: 7, desc: 'Cono de fuego delante del mago.' },
+    whip:    { active: false, school: 'fuego',                 name: 'Látigo de sombra',    max: 7, desc: 'Barrido rápido a ambos lados.' },
+    clock:   { active: false, school: 'fuego',                 name: 'Reloj roto',          max: 7, desc: 'Zona que ralentiza el tiempo a los enemigos.' },
+  },
+  relics: {
+    speed:   { active: true,  ic: 'speed',  name: 'Botas de niebla',   max: 5, desc: '+8% velocidad de movimiento.' },
+    vit:     { active: true,  ic: 'vit',    name: 'Corazón astral',    max: 5, desc: '+20 vida máxima y te cura entero.' },
+    magnet:  { active: true,  ic: 'magnet', name: 'Imán de cristales', max: 5, desc: '+40% radio para recoger cristales.' },
+    power:   { active: true,  ic: 'power',  name: 'Orbe arcano',       max: 5, desc: '+12% daño de todos los poderes.' },
+    haste:   { active: true,  ic: 'haste',  name: 'Reloj de arena',    max: 5, desc: 'Los hechizos se lanzan un 8% más rápido.' },
+    lens:    { active: false, name: 'Lupa de cristal',   max: 5, desc: '+área de los poderes.' },
+    twin:    { active: false, name: 'Espejo gemelo',     max: 5, desc: '+1 proyectil.' },
+    candle:  { active: false, name: 'Vela negra',        max: 5, desc: '+duración de los poderes.' },
+    clover:  { active: false, name: 'Trébol podrido',    max: 5, desc: '+suerte.' },
+    scale:   { active: false, name: 'Escama de dragón',  max: 5, desc: '+armadura.' },
+    chalice: { active: false, name: 'Cáliz de sangre',   max: 5, desc: 'Regeneración de vida.' },
+    feather: { active: false, name: 'Pluma de cuervo',   max: 5, desc: '+velocidad de proyectil.' },
+  },
+  // Objetos especiales: solo salen de cofres de jefe (Fase 4). Rareza: raro, épico, legendario.
+  items: {
+    heliothTooth:  { active: false, name: 'Diente de Helioth',          desc: 'Tus proyectiles queman 3 s.', from: 'Helioth', rarity: 'epico' },
+    gnomeCrown:    { active: false, name: 'Corona del Rey Gnomo',       desc: 'Cada 10 gnomos muertos, uno lucha a tu lado.', from: 'Rey Gnomo', rarity: 'epico' },
+    stoneHeart:    { active: false, name: 'Corazón de Piedra',          desc: '+50% vida máxima, −10% velocidad.', from: 'Gigante de Piedra', rarity: 'epico' },
+    queenPiece:    { active: false, name: 'Pieza de la Reina',          desc: 'El Suelo de ajedrez aparece donde mueren élites.', from: 'Reina Blanca', rarity: 'epico' },
+    mageMirror:    { active: false, name: 'Espejo del Mago',            desc: 'Copia al azar uno de tus poderes al 50%.', from: 'Mago Espejo', rarity: 'legendario' },
+    motherRoot:    { active: false, name: 'Raíz Madre',                 desc: 'Regeneras 1% de vida por segundo sobre hierba.', from: 'Árbol Vivo', rarity: 'epico' },
+    dragonScale:   { active: false, name: 'Escama del Dragón Antiguo',  desc: 'Inmune al fuego; tus poderes de Fuego +30%.', from: 'Dragón', rarity: 'legendario' },
+    goldHourglass: { active: false, name: 'Reloj de Arena Dorado',      desc: '−15% tiempo de recarga de todo.', from: 'común', rarity: 'raro' },
+    bottomlessBag: { active: false, name: 'Bolsa sin Fondo',            desc: '+1 hueco de reliquia (7 en total).', from: 'común', rarity: 'legendario' },
+    crystalEye:    { active: false, name: 'Ojo de Cristal',             desc: 'Ves cofres malditos y élites en el borde de la pantalla.', from: 'común', rarity: 'raro' },
+    dreamcatcher:  { active: false, name: 'Atrapasueños',               desc: 'Cada 60 s atrae todas las bolitas del mapa.', from: 'común', rarity: 'raro' },
+    phoenixFeather:{ active: false, name: 'Pluma de Fénix',             desc: 'Al morir, renaces una vez con toda la vida.', from: 'común', rarity: 'legendario' },
+  },
+  // Bolitas de experiencia (valor, color, tamaño)
+  orbs: [ { v: 1, color: 0x3ef0ff, s: 0.3 }, { v: 5, color: 0xb04aff, s: 0.42 }, { v: 25, color: 0xffb300, s: 0.55 }, { v: 100, color: 0xff2a4a, s: 0.75, aura: true } ],
+  // Curvas de dificultad (t en minutos). Ver "Equilibrio" en docs/DISENO.md
+  curve: {
+    hp: t => (1 + 0.12 * Math.min(t, 15) + 0.012 * Math.min(t, 15) ** 2) * Math.pow(1.15, Math.max(0, t - 15)),
+    dmg: t => 1 + 0.06 * t,
+    speed: t => 1 + Math.min(0.3, 0.02 * t),
+    cap: t => t < 5 ? 30 + 24 * t : t < 10 ? 150 + 30 * (t - 5) : Math.min(400, 300 + 20 * (t - 10)),
+  },
+  slots: { powers: 6, relics: 6 },
+  // Números de equilibrio ajustados con el simulador (?sim). En simulación se pueden variar con ?bal={"playerHp":150,...}
+  // hoodGap: separación mínima entre disparos de encapuchados de toda la horda (0 = sin límite)
+  balance: { playerHp: 100, invuln: 0.85, xpMul: 1, xp: [10, 11, 0.08], bossHp: 930, bossAt: 150, bossDmg: 10, bossBolt: 6,
+    hoodBolt: 5, hoodEvery: [4, 6], hoodRange: 12, hoodSpeed: 6, hoodGap: 0, healChance: 0.012, healAmount: 25 },
 };
-const PASSIVES = {
-  speed:  { ic: 'speed', name: 'Botas de niebla', max: 5, desc: '+8% velocidad de movimiento.' },
-  vit:    { ic: 'vit', name: 'Corazón astral', max: 5, desc: '+20 vida máxima y te cura entero.' },
-  magnet: { ic: 'magnet', name: 'Imán de cristales', max: 5, desc: '+40% radio para recoger cristales.' },
-  power:  { ic: 'power', name: 'Orbe arcano', max: 5, desc: '+12% daño de todos los poderes.' },
-  haste:  { ic: 'haste', name: 'Reloj de arena', max: 5, desc: 'Los hechizos se lanzan un 8% más rápido.' },
-};
+try { const m = location.search.match(/[?&]bal=([^&]+)/); if (m) Object.assign(DB.balance, JSON.parse(decodeURIComponent(m[1]))); } catch (e) { console.warn('bal', e); }
+const BAL = DB.balance;
+const POWERS = Object.fromEntries(Object.entries(DB.powers).filter(([, d]) => d.active));
+const PASSIVES = Object.fromEntries(Object.entries(DB.relics).filter(([, d]) => d.active));
 
 // ---------- Estado ----------
 const player = buildPlayer(); scene.add(player);
-let P, state = 'start', time = 0, spawnT = 0, nextBoss = 150, boss = null, bossCount = 0, waveIdx = 1, pendingLv = 0;
+let hoodLast = -9, P, state = 'start', time = 0, spawnT = 0, nextBoss = 150, boss = null, bossCount = 0, waveIdx = 1, pendingLv = 0;
 const enemies = [], bolts = [], gems = [], fx = [], zones = [], portals = [], shrooms = [];
 const W = { eyeT: 0.5, eyes: [], moons: [], moonA: 0, chessT: 1, portalT: 2, stormT: 1, shroomT: 1.5 };
 const dmgMul = () => 1 + 0.12 * (P.passives.power || 0);
@@ -1654,8 +1728,8 @@ function reset() {
   for (const f of fx) { scene.remove(f.obj); } fx.length = 0;
   for (const d of dying) scene.remove(d.g); dying.length = 0; corpses.length = 0; mageReset(); clearParticles();
   W.eyes.forEach(m => scene.remove(m)); W.eyes.length = 0; W.moons.forEach(m => scene.remove(m)); W.moons.length = 0;
-  P = { pos: new THREE.Vector3(), hp: 100, maxHp: 100, lvl: 1, xp: 0, next: 6, inv: 0, kills: 0, powers: { eye: 1 }, passives: {} };
-  time = 0; spawnT = 0.5; nextBoss = 150; boss = null; bossCount = 0; waveIdx = 1; pendingLv = 0;
+  P = { pos: new THREE.Vector3(), hp: BAL.playerHp, maxHp: BAL.playerHp, lvl: 1, xp: 0, next: Math.floor((BAL.xp[0] + BAL.xp[1] + BAL.xp[2]) * BAL.xpMul), inv: 0, kills: 0, powers: { eye: 1 }, passives: {}, dmgBy: {}, hurtBy: {}, bosses: 0 };
+  time = 0; spawnT = 0.5; nextBoss = BAL.bossAt; boss = null; bossCount = 0; waveIdx = 1; pendingLv = 0;
   Object.assign(W, { eyeT: 0.5, moonA: 0, chessT: 1, portalT: 2, stormT: 1, shroomT: 1.5 });
   bossLight.intensity = 0; $('bosswrap').style.display = 'none';
   player.position.set(0, 0, 0);
@@ -1669,8 +1743,8 @@ function spawnEnemy(type, x, z) {
   const g = rk ? new THREE.Object3D() : B[type](); g.scale.setScalar(def.sc);
   if (x === undefined) [x, z] = spawnPoint();
   g.position.set(x, 0, z); if (!rk) scene.add(g);
-  const hpMul = def.boss ? (1 + bossCount * 0.6) : 1 + time / 60 * 0.45;
-  const e = { type, def, g, hp: def.hp * hpMul, maxHp: def.hp * hpMul, r: def.r, speed: def.speed * rand(0.9, 1.1), dmg: def.dmg, hitT: 0, moonCd: 0, slow: 0, shootT: rand(1.5, 3.5), ph: rand(0, TAU), sc: def.sc, dead: false, rk, hitA: -1 };
+  const t = time / 60, hpMul = def.boss ? (1 + bossCount * 0.6) * BAL.bossHp / def.hp : DB.curve.hp(t), dmgK = def.boss ? 1 : DB.curve.dmg(t), spK = def.boss ? 1 : DB.curve.speed(t);
+  const e = { type, def, g, hp: def.hp * hpMul, maxHp: def.hp * hpMul, r: def.r, speed: def.speed * spK * rand(0.9, 1.1), dmg: (def.boss ? BAL.bossDmg : def.dmg) * dmgK, hitT: 0, moonCd: 0, slow: 0, shootT: rand(1.5, 3.5), ph: rand(0, TAU), sc: def.sc, dead: false, rk, hitA: -1 };
   enemies.push(e); return e;
 }
 function chooseType() {
@@ -1678,13 +1752,13 @@ function chooseType() {
   for (const w of pool) { r -= w.w; if (r <= 0) return w.type; } return 'goblin';
 }
 function spawnBoss() {
-  boss = spawnEnemy('boss');
+  boss = spawnEnemy('boss'); boss.spawnT = time;
   bossLight.intensity = 2.2;
   $('bosswrap').style.display = 'block';
   banner('¡Despierta Helioth, el Sol que Sueña!', 3, 'sun'); SND.play('boss'); SND.music('boss');
 }
-function hurt(e, dmg) {
-  if (e.dead) return; e.hp -= dmg; e.hitT = 0.12; SND.play('hit');
+function hurt(e, dmg, src) {
+  if (e.dead) return; if (e.def.boss && e.firstHit === undefined) e.firstHit = time; if (src) P.dmgBy[src] = (P.dmgBy[src] || 0) + Math.min(dmg, Math.max(0, e.hp)); e.hp -= dmg; e.hitT = 0.12; SND.play('hit');
   if (e.hitA < -0.25) e.hitA = HIT_DUR;
   if (e.hp <= 0) kill(e);
 }
@@ -1696,14 +1770,15 @@ function kill(e) {
   puff(p.x, p.z, e.def.color, e.def.boss ? 4 : 1);
   burst(p.x, 0.8, p.z, e.def.boss ? 60 : 5, e.def.boss ? 0xffb300 : 0xb04aff, e.def.boss ? 9 : 2.5, 3, 0.5);
   if (e.def.boss) {
-    for (let i = 0; i < 20; i++) dropGem(p.x + rand(-3, 3), p.z + rand(-3, 3), 6);
+    dropGem(p.x, p.z, 100); for (let i = 0; i < 4; i++) dropGem(p.x + rand(-3, 3), p.z + rand(-3, 3), 25);   // ~3 niveles de golpe
     dropHeal(p.x, p.z);
-    boss = null; bossCount++; nextBoss = time + 180; bossLight.intensity = 0; $('bosswrap').style.display = 'none';
+    if (SIM) SIM.cur.bossKill.push(time - (e.firstHit !== undefined ? e.firstHit : e.spawnT));   // tiempo de combate: desde el primer golpe
+    boss = null; bossCount++; P.bosses++; nextBoss = time + 180; bossLight.intensity = 0; $('bosswrap').style.display = 'none';
     banner('¡Has derrotado a Helioth! Sigue sobreviviendo…', 3, 'star'); SND.play('bossDie'); SND.music('calm');
     return;
   }
   dropGem(p.x, p.z, e.def.xp);
-  if (Math.random() < 0.012) dropHeal(p.x + 0.6, p.z);
+  if (Math.random() < BAL.healChance) dropHeal(p.x + 0.6, p.z);
   if (e.def.split) for (let i = 0; i < 2; i++) spawnEnemy('minignome', p.x + rand(-0.8, 0.8), p.z + rand(-0.8, 0.8));
 }
 function nearest(pos, maxD) {
@@ -1716,9 +1791,9 @@ function enemiesNear(x, z, r) {
   for (const e of enemies) { if (e.dead) continue; const dx = e.g.position.x - x, dz = e.g.position.z - z; if (dx * dx + dz * dz < r2) out.push(e); }
   return out;
 }
-function hurtArea(x, z, r, dmg) { for (const e of enemiesNear(x, z, r + 0.3)) hurt(e, dmg); }
-function damagePlayer(d) {
-  P.hp -= d; P.inv = 0.85; mageUpper('hit'); SND.play('hurt');
+function hurtArea(x, z, r, dmg, src) { for (const e of enemiesNear(x, z, r + 0.3)) hurt(e, dmg, src); }
+function damagePlayer(d, src) {
+  if (src) P.hurtBy[src] = (P.hurtBy[src] || 0) + d; P.hp -= d; P.inv = BAL.invuln; mageUpper('hit'); SND.play('hurt');
   const f = $('dmgflash'); f.style.transition = 'none'; f.style.opacity = 1; requestAnimationFrame(() => { f.style.transition = 'opacity .35s'; f.style.opacity = 0; });
 }
 
@@ -1729,20 +1804,36 @@ function fireBolt(from, tx, tz, dmg, pierce) {
   const m = new THREE.Mesh(G.sph, M.bolt); m.scale.setScalar(0.2); m.position.set(from.x, 1.2, from.z); scene.add(m);
   bolts.push({ mesh: m, vx: dx / d * 18, vz: dz / d * 18, life: 1.3, dmg, pierce, hit: new Set(), enemy: false });
 }
-function enemyBolt(x, z, dx, dz, sp, dmg, y = 1.2) {
+function enemyBolt(x, z, dx, dz, sp, dmg, y = 1.2, src = 'disparo') {
   SND.play('eshot');
   const m = new THREE.Mesh(G.sph, M.ebolt); m.scale.setScalar(0.28); m.position.set(x, y, z); scene.add(m);
-  bolts.push({ mesh: m, vx: dx * sp, vz: dz * sp, life: 4, dmg, enemy: true });
+  bolts.push({ mesh: m, vx: dx * sp, vz: dz * sp, life: 4, dmg, enemy: true, src });
+}
+// Bolitas de experiencia: 1 (cian), 5 (morado), 25 (oro) y 100 (rojo con aura). Con más de 300 en el suelo,
+// la nueva se funde con la más lejana del jugador, que crece y cambia de color según el valor que acumula.
+const ORB_MAT = DB.orbs.map(o => new THREE.MeshPhongMaterial({ color: o.color, emissive: o.color, emissiveIntensity: 0.55, flatShading: true, shininess: 60 }));
+const orbTier = v => v >= 100 ? 3 : v >= 25 ? 2 : v >= 5 ? 1 : 0;
+function styleOrb(gm) {
+  const t = orbTier(gm.val), o = DB.orbs[t], m = gm.mesh;
+  if (gm.tier === t) return; gm.tier = t;
+  m.material = ORB_MAT[t]; m.scale.set(o.s, o.s * 1.4, o.s);
+  if (o.aura && !m.userData.aura) {
+    const a = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: o.color, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending }));
+    a.scale.setScalar(4); m.add(a); m.userData.aura = a;
+  }
 }
 function dropGem(x, z, v) {
-  if (gems.length > 300) { pick(gems).val += v; return; }
-  const tier = v >= 5 ? 2 : v >= 2 ? 1 : 0;
-  const m = new THREE.Mesh(G.oct, M.gem[tier]); const gs = 0.36 + tier * 0.12; m.scale.set(gs, gs * 1.4, gs); m.position.set(x, 0.5, z); scene.add(m);
-  gems.push({ mesh: m, val: v, pull: false, heal: 0 });
+  if (gems.length >= 300) {   // fusiona con la más lejana (que no esté ya volando hacia el jugador)
+    let far = null, fd = -1;
+    for (const gm of gems) { if (gm.heal || gm.pull) continue; const d = (gm.mesh.position.x - P.pos.x) ** 2 + (gm.mesh.position.z - P.pos.z) ** 2; if (d > fd) { fd = d; far = gm; } }
+    if (far) { far.val += v; styleOrb(far); return; }
+  }
+  const m = new THREE.Mesh(G.oct, ORB_MAT[0]); m.position.set(x, 0.5, z); scene.add(m);
+  const gm = { mesh: m, val: v, pull: false, heal: 0, tier: -1 }; styleOrb(gm); gems.push(gm);
 }
 function dropHeal(x, z) {
   const m = new THREE.Mesh(G.oct, M.heal); m.scale.setScalar(0.32); m.position.set(x, 0.6, z); scene.add(m);
-  gems.push({ mesh: m, val: 0, pull: false, heal: 25 });
+  gems.push({ mesh: m, val: 0, pull: false, heal: BAL.healAmount });
 }
 function addFx(obj, life, grow, opacity) {
   scene.add(obj); fx.push({ obj, life, max: life, grow, base: obj.scale.x, op: opacity });
@@ -1809,7 +1900,7 @@ function updatePowers(dt) {
       for (const e of enemies) {
         if (e.dead || e.moonCd > 0) continue;
         const dx = e.g.position.x - m.position.x, dz = e.g.position.z - m.position.z, d = Math.hypot(dx, dz);
-        if (d < e.r + 0.45) { hurt(e, dmg); e.moonCd = 0.45; SND.play('moon'); if (!e.def.boss && d > 0) { e.g.position.x += dx / d * 0.5; e.g.position.z += dz / d * 0.5; } }
+        if (d < e.r + 0.45) { hurt(e, dmg, 'moons'); e.moonCd = 0.45; SND.play('moon'); if (!e.def.boss && d > 0) { e.g.position.x += dx / d * 0.5; e.g.position.z += dz / d * 0.5; } }
       }
     });
   }
@@ -1830,7 +1921,7 @@ function updatePowers(dt) {
     if (zn.tick <= 0) {
       zn.tick = 0.3;
       for (let k = 0; k < 6; k++) emit(zn.x + rand(-zn.half, zn.half), 0.15, zn.z + rand(-zn.half, zn.half), 0, rand(1, 2.5), 0, pick([0xe2c4ff, 0xffffff, 0xb04aff]), 0.6);
-      for (const e of enemies) { if (e.dead) continue; if (Math.abs(e.g.position.x - zn.x) < zn.half && Math.abs(e.g.position.z - zn.z) < zn.half) { hurt(e, zn.dmg); e.slow = 0.4; } }
+      for (const e of enemies) { if (e.dead) continue; if (Math.abs(e.g.position.x - zn.x) < zn.half && Math.abs(e.g.position.z - zn.z) < zn.half) { hurt(e, zn.dmg, 'chess'); e.slow = 0.4; } }
     }
     if (zn.life <= 0) { scene.remove(zn.mesh); zn.mesh.material.dispose(); zones.splice(i, 1); }
   }
@@ -1855,7 +1946,7 @@ function updatePowers(dt) {
       const dx = p.x - e.g.position.x, dz = p.z - e.g.position.z, d = Math.hypot(dx, dz) || 1;
       e.g.position.x += dx / d * Math.min(d, 6 * dt); e.g.position.z += dz / d * Math.min(d, 6 * dt);
     }
-    if (p.tick <= 0) { p.tick = 0.25; hurtArea(p.x, p.z, p.r, p.dmg); }
+    if (p.tick <= 0) { p.tick = 0.25; hurtArea(p.x, p.z, p.r, p.dmg, 'portal'); }
     if (p.life <= 0) { scene.remove(p.mesh); p.mesh.material.dispose(); portals.splice(i, 1); }
   }
   // Tormenta morada
@@ -1866,7 +1957,7 @@ function updatePowers(dt) {
       const c = enemiesNear(P.pos.x, P.pos.z, 15), n = 1 + Math.floor(pl.storm / 2);
       for (let i = 0; i < n && c.length; i++) {
         const e = c.splice(Math.floor(Math.random() * c.length), 1)[0], x = e.g.position.x, z = e.g.position.z;
-        lightning(x, z); SND.play('storm'); hurtArea(x, z, 1.3, (12 + 7 * pl.storm) * dm);
+        lightning(x, z); SND.play('storm'); hurtArea(x, z, 1.3, (12 + 7 * pl.storm) * dm, 'storm');
       }
     }
   }
@@ -1883,7 +1974,7 @@ function updatePowers(dt) {
   for (let i = shrooms.length - 1; i >= 0; i--) {
     const s = shrooms[i]; s.fuse -= dt; s.mesh.scale.setScalar(1 + (1.2 - s.fuse) * 0.6 + Math.sin(time * 30) * 0.05);
     if (s.fuse <= 0) {
-      hurtArea(s.x, s.z, s.r, s.dmg); SND.play('shroom'); burst(s.x, 0.4, s.z, 34, 0x8cff1a, s.r * 2.2, 3.5, 0.7); burst(s.x, 0.4, s.z, 10, 0xe8ff9a, s.r * 1.2, 5, 0.5);
+      hurtArea(s.x, s.z, s.r, s.dmg, 'shroom'); SND.play('shroom'); burst(s.x, 0.4, s.z, 34, 0x8cff1a, s.r * 2.2, 3.5, 0.7); burst(s.x, 0.4, s.z, 10, 0xe8ff9a, s.r * 1.2, 5, 0.5);
       const b = new THREE.Mesh(G.sph, basicMat(0x66ff44, 0.6, true)); b.position.set(s.x, 0.3, s.z); b.scale.setScalar(0.4); addFx(b, 0.35, s.r, 0.6);
       scene.remove(s.mesh); shrooms.splice(i, 1);
     }
@@ -1893,7 +1984,7 @@ function updatePowers(dt) {
 // ---------- Subida de nivel ----------
 function addXP(v) {
   P.xp += v;
-  while (P.xp >= P.next) { P.xp -= P.next; P.lvl++; P.next = Math.floor(6 + P.lvl * 4 + P.lvl * P.lvl * 0.3); pendingLv++; }
+  while (P.xp >= P.next) { P.xp -= P.next; P.lvl++; P.next = Math.floor((BAL.xp[0] + P.lvl * BAL.xp[1] + P.lvl * P.lvl * BAL.xp[2]) * BAL.xpMul); pendingLv++; }
   if (pendingLv > 0 && state === 'play') openLevelUp();
 }
 let curOpts = [];
@@ -1901,8 +1992,10 @@ function openLevelUp() {
   SND.play('levelup');
   state = 'levelup'; hideJoy();
   const pool = [];
-  for (const k in POWERS) { const l = P.powers[k] || 0; if (l < POWERS[k].max) pool.push({ kind: 'power', key: k, lvl: l + 1 }); }
-  for (const k in PASSIVES) { const l = P.passives[k] || 0; if (l < PASSIVES[k].max) pool.push({ kind: 'passive', key: k, lvl: l + 1 }); }
+  // Inventario 6 + 6: con los huecos llenos solo salen mejoras de lo que ya tienes
+  const fullP = Object.keys(P.powers).length >= DB.slots.powers, fullR = Object.keys(P.passives).length >= DB.slots.relics;
+  for (const k in POWERS) { const l = P.powers[k] || 0; if (l < POWERS[k].max && (l > 0 || !fullP)) pool.push({ kind: 'power', key: k, lvl: l + 1 }); }
+  for (const k in PASSIVES) { const l = P.passives[k] || 0; if (l < PASSIVES[k].max && (l > 0 || !fullR)) pool.push({ kind: 'passive', key: k, lvl: l + 1 }); }
   for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
   curOpts = pool.slice(0, 3); if (!curOpts.length) curOpts = [{ kind: 'heal' }];
   const box = $('cards'); box.innerHTML = '';
@@ -1970,8 +2063,20 @@ addEventListener('pointermove', e => {
 const endJoy = e => { if (e.pointerId === joy.id) hideJoy(); };
 addEventListener('pointerup', endJoy); addEventListener('pointercancel', endJoy);
 
+function renderBuild() {
+  const slots = (list, defs, n) => { let h = ''; for (let i = 0; i < n; i++) { const k = list[i]; h += k ? `<div class="slot" title="${defs[k].name}">${icon(defs[k].ic)}<i>${(defs === POWERS ? P.powers : P.passives)[k]}</i></div>` : '<div class="slot empty"></div>'; } return h; };
+  $('buildBox').innerHTML = `<div class="row"><div class="ttl">Poderes</div><div class="slots">${slots(Object.keys(P.powers), POWERS, DB.slots.powers)}</div></div>`
+    + `<div class="row"><div class="ttl">Reliquias</div><div class="slots">${slots(Object.keys(P.passives), PASSIVES, DB.slots.relics)}</div></div>`
+    + `<div class="info">Tiempo <b>${fmt(time)}</b> · Nivel <b>${P.lvl}</b> · Enemigos <b>${P.kills}</b> · Vida <b>${Math.ceil(P.hp)}/${P.maxHp}</b></div>`;
+}
+// Reparto del daño por poder (pantalla de muerte)
+function dmgRowsHtml() {
+  const tot = Object.values(P.dmgBy).reduce((a, b) => a + b, 0) || 1;
+  return '<div class="dmgrows">' + Object.entries(P.dmgBy).sort((a, b) => b[1] - a[1]).map(([k, v]) =>
+    `<div class="dmgrow">${icon(POWERS[k].ic)}<div class="bar2"><div style="width:${(v / tot * 100).toFixed(0)}%"></div></div><span>${Math.round(v / tot * 100)}%</span></div>`).join('') + '</div>';
+}
 function togglePause() {
-  if (state === 'play') { state = 'pause'; hideJoy(); $('pause').classList.remove('hidden'); SND.pause(true); }
+  if (state === 'play') { state = 'pause'; hideJoy(); renderBuild(); $('pause').classList.remove('hidden'); SND.pause(true); }
   else if (state === 'pause') { state = 'play'; $('pause').classList.add('hidden'); SND.pause(false); }
 }
 $('pauseBtn').onclick = () => { if (state === 'play' || state === 'pause') togglePause(); };
@@ -1986,6 +2091,7 @@ $('resumeBtn').onclick = togglePause;
     registerType('skeleton', bakeGltf(sk, 1.9, { vein: (r, g, b) => b > 0.6 && b > r * 1.1 }));   // huesos de piedra con venas eléctricas
     registerType('hooded', bakeGltf(ho, 2.2, { eyes: { x: 0.17, y: 0.42, z: 0.22, r: 0.11, color: PAL.acid } }));
     btn.disabled = false; btn.textContent = txt;
+    if (SIM) simStart();
   }).catch(err => { console.error(err); btn.textContent = 'Error al cargar'; });
 }
 // Créditos: se leen de CREDITS.md (markdown sencillo: títulos, listas, negrita y enlaces)
@@ -2021,13 +2127,79 @@ function setBest(v) { try { localStorage.setItem('pds_best', v); } catch (e) {} 
 { const b = getBest(); if (b) $('best').innerHTML = icon('star') + 'Mejor sueño: ' + fmt(b); }
 
 function gameOver() {
+  if (SIM) return simEnd('muerte');
   state = 'over'; hideJoy(); player.visible = true; mageDie(); SND.music(null); SND.play('over');
   const best = Math.max(getBest(), time); setBest(best);
   const row = (ic, k, v) => `<span class="k">${icon(ic)}${k}</span><b>${v}</b>`;
-  $('overStats').innerHTML = row('haste', 'Tiempo', fmt(time)) + row('power', 'Nivel', P.lvl) + row('skull', 'Enemigos', P.kills) + row('star', 'Mejor sueño', fmt(best))
-    + (time >= best && time > 1 ? '<span class="rec">¡Nuevo récord!</span>' : '');
+  $('overStats').innerHTML = row('haste', 'Tiempo', fmt(time)) + row('power', 'Nivel', P.lvl) + row('skull', 'Enemigos', P.kills) + row('sun', 'Jefes', P.bosses) + row('star', 'Mejor sueño', fmt(best))
+    + (time >= best && time > 1 ? '<span class="rec">¡Nuevo récord!</span>' : '') + dmgRowsHtml();
   $('best').innerHTML = icon('star') + 'Mejor sueño: ' + fmt(best);
   $('over').classList.remove('hidden');
+}
+
+// ---------- Modo simulación (?sim=50) ----------
+// Un bot se mueve en círculos, elige mejoras al azar y juega lo más rápido posible sin dibujar.
+// Registra minuto de muerte, nivel por minuto, DPS, reparto de daño por poder y tiempo en matar a Helioth.
+const SIM = (() => {
+  const m = location.search.match(/[?&]sim(?:=(\d+))?/); if (!m) return null;
+  const r = location.search.match(/[?&]r=(\d+)/); const av = location.search.match(/[?&]avoid=([\d.]+)/); const mm = location.search.match(/[?&]min=(\d+)/); return { maxMin: mm ? +mm[1] : 15, n: +(m[1] || 50), r: r ? +r[1] : 20, avoid: av ? +av[1] : 1, runs: [], cur: null, ang: 0, dir: 1, done: false };
+})();
+function simStart() {
+  reset(); state = 'play'; $('start').classList.add('hidden');
+  SIM.ang = rand(0, TAU); SIM.dir = Math.random() < 0.5 ? 1 : -1;
+  SIM.cur = { lvlAt: [], dmgAt: [], bossSpawn: [], bossKill: [], minute: 0 };
+}
+function simDmg() { return Object.values(P.dmgBy).reduce((a, b) => a + b, 0); }
+function simEnd(reason) {
+  const c = SIM.cur;
+  SIM.runs.push({ reason, hurtBy: { ...P.hurtBy }, t: time, lvl: P.lvl, kills: P.kills, lvlAt: c.lvlAt, dmgAt: c.dmgAt, bossKill: c.bossKill, dmgBy: { ...P.dmgBy }, powers: { ...P.powers }, passives: { ...P.passives } });
+  if (SIM.runs.length >= SIM.n) { SIM.done = true; state = 'sim-done'; simReport(); } else simStart();
+}
+function simStep(dt) {
+  // bot: círculo amplio (radio SIM.r) alrededor de donde está
+  SIM.ang += SIM.dir * dt * pSpeed() / SIM.r; let jx = -Math.sin(SIM.ang) * SIM.dir, jz = Math.cos(SIM.ang) * SIM.dir;
+  // como un jugador novato: se desvía hacia la bolita más cercana si está a menos de 7
+  let best = null, bd = 49; for (const gm of gems) { const dx = gm.mesh.position.x - P.pos.x, dz = gm.mesh.position.z - P.pos.z, d = dx * dx + dz * dz; if (d < bd) { bd = d; best = [dx, dz]; } }
+  if (best) { const l = Math.hypot(best[0], best[1]) || 1; jx = jx * 0.4 + best[0] / l * 0.6; jz = jz * 0.4 + best[1] / l * 0.6; }
+  // y se aparta de los enemigos que tiene muy cerca (sin planificar nada más)
+  let ax = 0, az = 0; for (const e of enemies) { if (e.dead) continue; const dx = P.pos.x - e.g.position.x, dz = P.pos.z - e.g.position.z, d = Math.hypot(dx, dz), R0 = 3 + e.r; if (d < R0 && d > 0.01) { const w = (R0 - d) / R0; ax += dx / d * w; az += dz / d * w; } }
+  jx += ax * SIM.avoid; jz += az * SIM.avoid;
+  joy.x = jx; joy.y = jz;
+  if (state === 'levelup') choose(Math.floor(Math.random() * curOpts.length));
+  if (state !== 'play') return;
+  update(dt); updateFx(dt);
+  // cámara como en el juego (la usa spawnPoint para saber qué se ve)
+  const el = (portrait ? 45 : 42) * Math.PI / 180, D = portrait ? 20 : 14.5, pitch = el - Math.atan(Math.tan(camera.fov / 2 * Math.PI / 180) * 0.2);
+  camera.position.set(P.pos.x, Math.sin(el) * D + 0.8, P.pos.z + Math.cos(el) * D); camera.rotation.set(-pitch, 0, 0);
+  const c = SIM.cur, min = Math.floor(time / 60);
+  while (c.minute < min) { c.minute++; c.lvlAt[c.minute] = P.lvl; c.dmgAt[c.minute] = simDmg(); }
+  if (state === "play" && time >= (SIM.maxMin || 15) * 60) simEnd("sobrevive");
+}
+function simReport() {
+  const R = SIM.runs, n = R.length, avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN, f1 = v => isNaN(v) ? '—' : v.toFixed(1);
+  const deaths = R.filter(r => r.reason === 'muerte').map(r => r.t / 60).sort((a, b) => a - b);
+  const pct = p => deaths.length ? deaths[Math.min(deaths.length - 1, Math.floor(p * deaths.length))] : NaN;
+  let out = `SIMULACIÓN: ${n} partidas\n`;
+  out += `Sobreviven 15 min: ${n - deaths.length}/${n}\n`;
+  out += `Muerte (min): media ${f1(avg(deaths))} · p10 ${f1(pct(0.1))} · mediana ${f1(pct(0.5))} · p90 ${f1(pct(0.9))}\n`;
+  out += `Nivel al morir/terminar: media ${f1(avg(R.map(r => r.lvl)))} · enemigos ${f1(avg(R.map(r => r.kills)))}\n\nMinuto | partidas vivas | nivel medio | DPS medio\n`;
+  for (let m = 1; m <= 15; m++) {
+    const alive = R.filter(r => r.lvlAt[m] !== undefined); if (!alive.length) break;
+    const dps = alive.map(r => (r.dmgAt[m] - (r.dmgAt[m - 1] || 0)) / 60);
+    out += `${String(m).padStart(6)} | ${String(alive.length).padStart(14)} | ${f1(avg(alive.map(r => r.lvlAt[m]))).padStart(11)} | ${f1(avg(dps)).padStart(9)}\n`;
+  }
+  const bk = R.map(r => r.bossKill[0]).filter(v => v !== undefined);
+  out += `\nHelioth (1ª vez): muerto en ${bk.length}/${R.filter(r => r.t > 150).length} partidas que llegan · tiempo medio ${f1(avg(bk))} s · min ${f1(Math.min(...bk))} · max ${f1(Math.max(...bk))}\n`;
+  const tot = {}; let all = 0; for (const r of R) for (const k in r.dmgBy) { tot[k] = (tot[k] || 0) + r.dmgBy[k]; all += r.dmgBy[k]; }
+  out += '\nReparto de daño total: ' + Object.entries(tot).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${POWERS[k].name} ${(v / all * 100).toFixed(0)}%`).join(' · ') + '\n';
+  const maxShare = R.map(r => { const t = Object.values(r.dmgBy).reduce((a, b) => a + b, 0) || 1; return Math.max(...Object.values(r.dmgBy)) / t; });
+  out += `Partidas donde un poder hace >40% del daño: ${maxShare.filter(v => v > 0.4).length}/${n}\n`;
+  const hb = {}; let ht = 0; for (const r of R) for (const k in r.hurtBy) { hb[k] = (hb[k] || 0) + r.hurtBy[k]; ht += r.hurtBy[k]; }
+  out += 'Daño recibido por fuente: ' + Object.entries(hb).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${(v / ht * 100).toFixed(0)}%`).join(' · ') + '\n';
+  window.__sim = { runs: R, text: out };
+  const pre = document.createElement('pre'); pre.id = 'simOut'; pre.textContent = out;
+  pre.style.cssText = 'position:fixed;inset:10px;overflow:auto;z-index:99;background:rgba(18,4,31,.94);color:#e2c4ff;font:15px/1.3 monospace;padding:14px;white-space:pre-wrap;pointer-events:auto';
+  document.body.appendChild(pre); console.log(out);
 }
 
 // ---------- Bucle principal ----------
@@ -2053,8 +2225,8 @@ function update(dt) {
   // Aparición de enemigos
   spawnT -= dt;
   if (spawnT <= 0) {
-    // Grupos que crecen con el tiempo; el tope de enemigos vivos sube poco a poco hasta 400
-    const cap = Math.min(MAX_ENEMIES, 40 + time), n = 2 + Math.floor(time / 30);
+    // Grupos que crecen con el tiempo; el tope de enemigos vivos sigue la curva del diseño (30 → 150 → 300 → 400)
+    const cap = Math.min(MAX_ENEMIES, DB.curve.cap(time / 60)), n = 2 + Math.floor(time / 30);
     const [cx, cz] = spawnPoint(), spr = 1.5 + n * 0.3;
     for (let i = 0; i < n && enemies.length < cap; i++) spawnEnemy(chooseType(), cx + rand(-spr, spr), cz + rand(-spr, spr));
     spawnT = Math.max(0.45, 1.6 - time * 0.005);
@@ -2076,13 +2248,13 @@ function update(dt) {
 
     } else e.hitA -= dt;
     if (e.hitT > 0) { e.hitT -= dt; g.scale.setScalar(e.sc * (1 + e.hitT * 2)); } else g.scale.setScalar(e.sc);
-    if (d < e.r + 0.5 && P.inv <= 0) damagePlayer(e.dmg);
-    if (e.def.shoots) { e.shootT -= dt; if (e.shootT <= 0 && d < 15) { enemyBolt(g.position.x, g.position.z, dx / d, dz / d, 7, 8); e.shootT = rand(2.5, 4); } }
+    if (d < e.r + 0.5 && P.inv <= 0) damagePlayer(e.dmg, e.type);
+    if (e.def.shoots) { e.shootT -= dt; if (e.shootT <= 0 && d < BAL.hoodRange && time - hoodLast >= BAL.hoodGap) { hoodLast = time; enemyBolt(g.position.x, g.position.z, dx / d, dz / d, BAL.hoodSpeed, BAL.hoodBolt * DB.curve.dmg(time / 60)); e.shootT = rand(BAL.hoodEvery[0], BAL.hoodEvery[1]); } }
     if (e.def.boss) {
       g.userData.rays.rotation.z += dt * 0.25;
       bossLight.position.set(g.position.x, 4, g.position.z);
       e.shootT -= dt;
-      if (e.shootT <= 0) { e.shootT = 3; const off = rand(0, TAU); for (let i = 0; i < 14; i++) { const a = off + i / 14 * TAU; enemyBolt(g.position.x, g.position.z, Math.cos(a), Math.sin(a), 6, 12, 2); } }
+      if (e.shootT <= 0) { e.shootT = 3; const off = rand(0, TAU); for (let i = 0; i < 14; i++) { const a = off + i / 14 * TAU; enemyBolt(g.position.x, g.position.z, Math.cos(a), Math.sin(a), 6, BAL.bossBolt, 2, 'boss-disparo'); } }
       $('bossfill').style.width = Math.max(0, e.hp / e.maxHp * 100) + '%';
     }
   }
@@ -2114,12 +2286,12 @@ function update(dt) {
     let dead = b.life <= 0;
     if (b.enemy) {
       const dx = P.pos.x - b.mesh.position.x, dz = P.pos.z - b.mesh.position.z;
-      if (dx * dx + dz * dz < 0.45 && P.inv <= 0) { damagePlayer(b.dmg); dead = true; }
+      if (dx * dx + dz * dz < 0.45 && P.inv <= 0) { damagePlayer(b.dmg, b.src || 'disparo'); dead = true; }
     } else {
       for (const e of enemies) {
         if (e.dead || b.hit.has(e)) continue;
         const dx = e.g.position.x - b.mesh.position.x, dz = e.g.position.z - b.mesh.position.z, rr = e.r + 0.25;
-        if (dx * dx + dz * dz < rr * rr) { hurt(e, b.dmg); b.hit.add(e); if (b.pierce-- <= 0) { dead = true; break; } }
+        if (dx * dx + dz * dz < rr * rr) { hurt(e, b.dmg, 'eye'); b.hit.add(e); if (b.pierce-- <= 0) { dead = true; break; } }
       }
     }
     if (dead) { scene.remove(b.mesh); bolts.splice(i, 1); }
@@ -2131,7 +2303,10 @@ function update(dt) {
     const gm = gems[i], m = gm.mesh; m.rotation.y += dt * 3; m.position.y = 0.7 + Math.sin(time * 4 + i) * 0.12;
     const dx = P.pos.x - m.position.x, dz = P.pos.z - m.position.z, d = Math.hypot(dx, dz);
     if (d < mr) gm.pull = true;
-    if (gm.pull) { const s = Math.min(d, 16 * dt); m.position.x += dx / (d || 1) * s; m.position.z += dz / (d || 1) * s; }
+    if (gm.pull) {
+      const s = Math.min(d, 16 * dt); m.position.x += dx / (d || 1) * s; m.position.z += dz / (d || 1) * s;
+      if (!gm.heal && Math.random() < 0.5) emit(m.position.x, m.position.y, m.position.z, rand(-0.3, 0.3), rand(0, 0.4), rand(-0.3, 0.3), DB.orbs[gm.tier].color, 0.3);   // estela
+    }
     if (d < 0.7) {
       scene.remove(m); gems.splice(i, 1);
       SND.play(gm.heal ? 'heal' : 'gem');
@@ -2177,6 +2352,10 @@ const camOff = new THREE.Vector3(), sepGrid = new Map();
 let last = performance.now();
 reset();
 function loop(now) {
+  if (SIM) {   // simulación: solo lógica, sin dibujar, todos los pasos que quepan en ~50 ms
+    if (SIM.cur && !SIM.done) { const t0 = performance.now(); while (performance.now() - t0 < 50 && !SIM.done) simStep(1 / 30); }
+    if (!SIM.done) requestAnimationFrame(loop); return;
+  }
   const raw = (now - last) / 1000, dt = Math.min(0.05, raw); last = now;
   if (state === 'play' || state === 'start') perfTick(raw);
   if (state === 'play') { update(dt); updateHud(); }
