@@ -205,14 +205,59 @@ Cada escenario: música propia, paleta dentro de la Guía visual y unos 5 tipos 
 - Animaciones: mago (reposo, correr inclinado, hechizo, golpe, morir); enemigos (aparecer del suelo, andar con balanceo propio, atacar, morir); élites y jefes con aviso antes de atacar.
 - Límites: 400 enemigos, 300 bolitas, un solo sistema de partículas, fluido en móvil.
 
+## Equilibrio: enemigos frente al poder del jugador
+
+Regla principal: el daño del jugador crece más rápido que la vida de los enemigos normales, así que te sientes cada vez más fuerte. El peligro viene de la cantidad de enemigos, de los élites y de los jefes.
+
+**Curvas de referencia** (t = minuto, escenario 1, árbol a medias)
+
+| Minuto | Vida de enemigos | Daño de enemigos | Enemigos a la vez | Nivel esperado | Daño esperado del jugador |
+| --- | --- | --- | --- | --- | --- |
+| 0 | ×1 | ×1 | 30 | 1 | ×1 |
+| 5 | ×1,9 | ×1,3 | 150 | 15 | ×4 |
+| 10 | ×3,4 | ×1,6 | 300 | 30 | ×12 (1 evolución) |
+| 15 | ×5,5 | ×1,9 | 400 | 45 | ×30 (2–3 evoluciones) |
+| 15+ | ×1,15 por minuto extra | +6% por minuto | 400 | — | Pesadilla acaba contigo |
+
+Fórmulas: vida = 1 + 0,12·t + 0,012·t²; daño = 1 + 0,06·t; velocidad +2% por minuto (tope +30%).
+
+**Élites y jefes**
+- Élite: 40 veces la vida de un enemigo normal de ese minuto; ataque con aviso.
+- Jefes ajustados por tiempo para matarlos con la build esperada: jefe 1 en 45–60 s, jefe 2 en 60–90 s, jefe final en 90–120 s. Vida = ese tiempo × DPS esperado en ese minuto (medido con simulaciones).
+- 2–3 ataques con aviso por jefe; un buen jugador no debería recibir más del 30% de su vida en el combate.
+
+**Fuentes de poder**
+
+| Fuente | Peso máximo | Regla |
+| --- | --- | --- |
+| Niveles y poderes | Base del cálculo | Incluidos en la tabla de arriba |
+| Evoluciones | ×2–×3 el poder evolucionado | La primera hacia el minuto 6–8; el jefe 2 la da por hecha |
+| Fusiones | ×1,5 sobre los dos poderes | Valen sobre todo por liberar hueco |
+| Dones | ×1,1–×1,3 cada uno | Legendarios solo en niveles 25 y 50 |
+| Objetos de jefe | ×1,1–×1,25 cada uno | Máximo 3 |
+| Árbol completo | ×1,6 en total | Se ajusta con árbol a medias |
+| Personajes | Ventaja ≈ desventaja | Todos llegan al min 15 con una partida media |
+
+**Escenarios y dificultad opcional**
+- Multiplicador de vida y daño por escenario: ×1; ×1,4; ×1,9; ×2,5.
+- Nodo "Maldición" en el árbol (opcional): +10% enemigos y +10% Polvo por rango.
+
+**Objetivos**
+- Jugador nuevo: muere entre el minuto 6 y 9.
+- Árbol a medias: llega al minuto 15 la mitad de las veces.
+- Nivel 15 en el min 5, 30 en el 10, 45 en el 15.
+- Ningún poder hace más del 40% del daño total en una build normal.
+
+**Partidas simuladas:** modo `?sim` con un bot que se mueve en círculos, elige mejoras al azar y juega a ×10 sin dibujar. Registra minuto de muerte, nivel por minuto, DPS, reparto de daño por poder y tiempo para matar cada jefe. Se crea en la Fase 1; después de cada fase se lanzan 50 partidas y se ajustan los números.
+
 ## Plan por fases
 
-1. **Base de datos y bolitas:** poderes, reliquias y objetos en tablas de datos; inventario 6 + 6; pausa con tu build; exp en bolitas.
+1. **Base de datos, bolitas y simulador:** poderes, reliquias y objetos en tablas de datos; inventario 6 + 6; pausa con tu build; exp en bolitas; curvas de dificultad de la sección Equilibrio y modo `?sim`.
 2. **Poderes y reliquias nuevos:** los 10 poderes y 7 reliquias que faltan, con 7 niveles.
 3. **Evoluciones, fusiones y cofres de élite:** élites, cofre normal, recetas y Grimorio.
 4. **Jefes, cofres de jefe y Dones:** estructura de 15 min con 3 jefes, objetos especiales, Dones y modo Pesadilla.
 5. **Personajes:** los 8 personajes y pantalla de selección.
 6. **Polvo de Sueño, Árbol y misiones:** moneda, árbol, misiones, desbloqueos y guardado.
 7. **Escenarios 2, 3 y 4:** uno por prompt.
-8. **Pulido:** animaciones, sensación de golpe, números de daño y equilibrio con partidas simuladas.
+8. **Pulido:** animaciones, sensación de golpe, números de daño y ajuste final del equilibrio. Cada fase anterior ya revisa sus números con el simulador.
 9. **CrazyGames:** SDK, anuncios con recompensa (revivir), guardado en la nube y envío.
