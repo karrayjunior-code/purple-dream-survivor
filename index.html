@@ -947,16 +947,14 @@ const PROC = {
     R.pop();
   },
 };
-// Jefe Helioth, el Sol que Sueña (modelo único, no instanciado): cara esculpida (models/helioth-face.glb, ver CREDITS.md)
+// Jefe Helioth, el Sol que Sueña (modelo único, no instanciado): cara hecha por código con rasgos grandes y de colores
 // incrustada en una esfera de lava, con rayos de fuego alrededor
 const HR = 2.1;                                                              // radio de la esfera
-let heliothFaceGeo = null;                                                   // se carga junto a los demás modelos
 // Material de lava común a cara y esfera: piel rugosa naranja-roja (relieve por ruido), venas amarillas brillantes
 // y oclusión por vértice (color) para que ojos, nariz y boca queden en sombra profunda
 const lavaMat = new THREE.MeshPhongMaterial({ color: 0xd8461a, vertexColors: true, shininess: 18, specular: 0x5a1a04 });
 const uLava = { uTime: { value: 0 }, uGlow: { value: 0 } };
-// la cara usa venas más tenues que la esfera para que se lean bien los rasgos
-const faceLavaMat = lavaMat.clone(); faceLavaMat.extensions = { derivatives: true }; lavaMat.extensions = { derivatives: true };
+lavaMat.extensions = { derivatives: true };
 const lavaCompile = vein => sh => {
   Object.assign(sh.uniforms, uLava); sh.uniforms.uVein = { value: vein }; sh.uniforms.uFace = { value: vein < 1 ? 1 : 0 };
   sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vObj;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvObj = position;');
@@ -969,21 +967,21 @@ const lavaCompile = vein => sh => {
         float hgt = rough(vObj); vec3 dpx = dFdx(-vViewPosition), dpy = dFdy(-vViewPosition);
         float dhx = dFdx(hgt), dhy = dFdy(hgt); vec3 r1 = cross(dpy, normal), r2 = cross(normal, dpx);
         float det = dot(dpx, r1); vec3 grad = sign(det) * (dhx * r1 + dhy * r2);
-        normal = normalize(abs(det) * normal - grad * mix(0.25, 0.06, uFace));
+        normal = normalize(abs(det) * normal - grad * mix(0.25, 0.05, max(uFace, smoothstep(0.9, 1.6, vObj.z))));
       }`)
     .replace('#include <color_fragment>', `#include <color_fragment>
       float ao = vColor.r;                                                         // 1 = expuesto, 0 = hueco profundo
       float mot = rough(vObj * 0.7);
-      diffuseColor.rgb = mix(vec3(0.45, 0.08, 0.02), vec3(0.95, 0.38, 0.1), mix(0.55 + 0.45 * mot, 0.8 + 0.2 * mot, uFace)) * mix(0.02, 1.0, pow(ao, 2.5)) * mix(1.0, 0.55, uFace);`)
+      diffuseColor.rgb = mix(vec3(0.45, 0.08, 0.02), vec3(0.95, 0.38, 0.1), mix(0.55 + 0.45 * mot, 0.78 + 0.22 * mot, max(uFace, smoothstep(0.9, 1.6, vObj.z)))) * mix(0.02, 1.0, pow(ao, 2.5)) * mix(1.0, 0.55, uFace);`)
     .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-      float vn = veins(vObj);
+      float vn = veins(vObj) * (1.0 - smoothstep(0.9, 1.6, vObj.z));   // la cara queda limpia para que se lean los rasgos
       totalEmissiveRadiance += vec3(1.4, 0.8, 0.1) * vn * smoothstep(0.55, 0.95, vColor.r) * uVein * (0.85 + 0.15 * sin(uTime * 2.0 + vObj.y * 3.0));
       // luz falsa cálida desde abajo a la izquierda (sin añadir luces a la escena): sombras siniestras en ojos, nariz y boca
       totalEmissiveRadiance += diffuseColor.rgb * vec3(1.3, 0.8, 0.5) * pow(max(dot(normal, normalize(vec3(-0.5, -0.6, 0.62))), 0.0), 2.0) * mix(0.9, 2.6, uFace);
       totalEmissiveRadiance += vec3(0.35, 0.1, 0.8) * pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 3.0) * 0.5;   // borde morado
       totalEmissiveRadiance += vec3(1.0, 0.35, 0.05) * uGlow;`);
 };
-lavaMat.onBeforeCompile = lavaCompile(1.0); faceLavaMat.onBeforeCompile = lavaCompile(0.3);
+lavaMat.onBeforeCompile = lavaCompile(1.0);
 // Oclusión aproximada por vértice: cuánto se hunde cada punto respecto a sus vecinos (huecos = oscuros)
 function bakeCavity(geo, strength, blur = 2) {
   const p = geo.attributes.position, n = p.count, idx = geo.index ? geo.index.array : null;
@@ -1042,55 +1040,63 @@ function buildFlames() {
   g.setAttribute('aDir', new THREE.BufferAttribute(dir, 3)); g.setAttribute('aTan', new THREE.BufferAttribute(tan, 3)); g.setIndex(idx);
   return g;
 }
-// Prepara la cara una vez: oclusión, oscurece hacia el borde (se funde con la esfera) y localiza las cuencas de los ojos
-function prepFace(geo) {
-  const p = geo.attributes.position, n = p.count;
-  // la escultura original sonríe: bajamos las comisuras y aplanamos las mejillas para un gesto serio y melancólico
-  const gs = (x, y, cx, cy, sx, sy) => Math.exp(-((x - cx) ** 2) / (2 * sx * sx) - ((y - cy) ** 2) / (2 * sy * sy));
-  for (let i = 0; i < n; i++) {
-    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
-    let dy = 0, dz = 0;
-    for (const sx of [-1, 1]) { const w = gs(x, y, 0.5 * sx, -0.32, 0.17, 0.14); dy -= 0.16 * w; dz -= 0.05 * w; dz -= 0.04 * gs(x, y, 0.42 * sx, -0.08, 0.15, 0.12); }
-    dy += 0.06 * gs(x, y, 0, -0.5, 0.2, 0.07);
-    // pasa al espacio del sol y curva el borde hacia dentro de la esfera: el contorno queda escondido y la cara "sale" de ella
-    const X = x * FACE_S, Y = (y + dy) * FACE_S; let Z = (z + dz) * FACE_S + FACE_Z;
-    const r = Math.hypot(x, y / 1.19), t = Math.min(1, Math.max(0, (r - 0.6) / 0.38)), tt = t * t * (3 - 2 * t);
-    const zs = SUN_K * Math.sqrt(Math.max(0, HR * HR - X * X - Y * Y)) - 0.12;
-    Z = Z + (Math.min(Z, zs) - Z) * tt;
-    p.setXYZ(i, X, Y, Z);
-  }
-  bakeCavity(geo, 90, 3);
-  // cuencas de los ojos: en la escultura están en (±0.40, 0.13); se busca la superficie justo ahí
-  const eyes = [-1, 1].map(sx => {
-    const ex = 0.4 * sx * FACE_S, ey = 0.13 * FACE_S; let zmax = -9, best = 9;
-    for (let i = 0; i < n; i++) { const d = Math.hypot(p.getX(i) - ex, p.getY(i) - ey); if (d < 0.1) zmax = Math.max(zmax, p.getZ(i)); }
-    return new THREE.Vector3(ex, ey, zmax > -9 ? zmax : FACE_Z - 0.3);
-  });
-  return { geo, eyes };
-}
-const FACE_S = 1.45, SUN_K = 0.6, FACE_Z = HR * SUN_K + 0.6;                  // escala de la cara, aplanado frontal del sol y profundidad de la cara                             // escala y posición de la cara; ángulo (rad) del hueco frontal de la esfera
+// Rasgos de la cara: piezas grandes y de colores distintos a la piel para que se lean a la distancia de juego
+const featMat = charMat.clone(); featMat.onBeforeCompile = sh => charShader(sh, { rimK: 0.25 });
+const irisMat = new THREE.MeshBasicMaterial({ color: 0x3ef0ff });
+const lidMat = new THREE.MeshPhongMaterial({ color: 0xa8300a, emissive: 0x2a0600, flatShading: true, shininess: 10 });
+const surfZ = (x, y) => Math.sqrt(Math.max(0, HR * HR - x * x - y * y));           // punto de la esfera delante de (x, y)
 function buildBoss() {
   const g = new THREE.Group(), h = new THREE.Group(); h.position.y = 3.4; g.add(h); g.userData.float = h; g.userData.fy = 3.4;
   const sway = new THREE.Group(); h.add(sway); g.userData.sway = sway;
-  // esfera de lava
-  // esfera de lava, aplanada al frente para que la cara quede por delante
-  const sg = new THREE.SphereGeometry(HR, 64, 40); sg.scale(1, 1, SUN_K); bakeCavity(sg, 0);
-  sway.add(new THREE.Mesh(sg, lavaMat));
-  // cara incrustada: el borde queda dentro de la esfera
-  if (heliothFaceGeo) {
-    const face = new THREE.Mesh(heliothFaceGeo.geo, faceLavaMat); sway.add(face);
-    // brillo tenue al fondo de cada cuenca, bajo los párpados
-    g.userData.glows = heliothFaceGeo.eyes.map(e => {
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffe07a, transparent: true, opacity: 0.55, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending }));
-      sp.position.set(e.x, e.y - 0.03, e.z - 0.02); sp.scale.set(0.55, 0.32, 1); sway.add(sp); return sp;
-    });
-  } else g.userData.glows = [];
+  const sg = new THREE.SphereGeometry(HR, 64, 40); bakeCavity(sg, 0); sway.add(new THREE.Mesh(sg, lavaMat));   // esfera de lava
+  const BROW = 0x14030c, SCL = 0xfff0c8, LIP = 0xd9a014, LIPD = 0x8a5a0a, SHADOW = 0x3a0600, NOSE = 0xe0581a;
+  let R = Rig();
+  for (const s of [-1, 1]) {
+    const ex = 0.66 * s, ey = 0.28;
+    // cuenca en sombra alrededor del ojo
+    R.add(CG.sph, SHADOW, 0.6, 0.42, 0.16, ex, ey + 0.02, surfZ(ex, ey) - 0.05, 0, 0, 0, 0.1);
+    // ceja oscura, gruesa y caída hacia fuera (gesto cansado y severo)
+    R.push(ex, 0.78, surfZ(ex, 0.78) - 0.02, -0.2, s * 0.3, -s * 0.2);
+    R.add(CG.box, BROW, 0.82, 0.2, 0.22, 0, 0, 0, 0, 0, 0, 0.15);
+    R.add(CG.box, BROW, 0.5, 0.16, 0.2, -s * 0.15, 0.08, 0, 0, 0, 0, 0.15);
+    R.pop();
+    // ojeras
+    R.add(CG.half, 0x6a1406, 0.46, 0.14, 0.12, ex, ey - 0.27, surfZ(ex, ey - 0.27) - 0.04, Math.PI, 0, 0, 0.2);
+  }
+  // nariz grande y marcada: puente, punta, aletas y sombra debajo
+  R.push(0, 0, surfZ(0, 0) - 0.08);
+  R.add(CG.box, NOSE, 0.3, 0.75, 0.32, 0, 0.12, 0.12, -0.28, 0, 0, 0.4);
+  R.add(CG.sph, NOSE, 0.3, 0.24, 0.27, 0, -0.27, 0.3, 0, 0, 0, 0.4);
+  for (const s of [-1, 1]) { R.add(CG.sph, NOSE, 0.17, 0.15, 0.17, 0.21 * s, -0.31, 0.18, 0, 0, 0, 0.3); R.add(CG.sph, SHADOW, 0.07, 0.05, 0.05, 0.11 * s, -0.42, 0.33, 0, 0, 0, 0); }
+  R.add(CG.sph, SHADOW, 0.42, 0.12, 0.1, 0, -0.47, 0.06, 0, 0, 0, 0);
+  R.pop();
+  // labios amarillo oscuro, gruesos, boca cerrada con las comisuras hacia abajo
+  const my = -0.86, mz = surfZ(0, my);
+  R.fx(0.2).add(CG.sph, LIP, 0.66, 0.16, 0.22, 0, my + 0.1, mz, 0.2, 0, 0, 0.5).fx(0);
+  for (const s of [-1, 1]) { R.add(CG.sph, LIP, 0.26, 0.1, 0.17, 0.46 * s, my + 0.02, surfZ(0.46, my) - 0.02, 0, 0, s * 0.45, 0.4); R.add(CG.sph, SHADOW, 0.09, 0.09, 0.08, 0.68 * s, my - 0.1, surfZ(0.68, my - 0.1) - 0.02, 0, 0, 0, 0); }
+  R.add(CG.box, 0x1a0300, 1.0, 0.05, 0.1, 0, my + 0.01, mz + 0.05, 0, 0, 0, 0);
+  sway.add(new THREE.Mesh(mergeParts(R.parts), featMat));
+  // labio inferior aparte: baja despacio antes de cada ataque y deja ver la boca oscura
+  const mouth = new THREE.Group(); mouth.position.set(0, my, mz); sway.add(mouth);
+  R = Rig(); R.add(CG.sph, 0x120002, 0.5, 0.2, 0.1, 0, -0.06, -0.04, 0, 0, 0, 0); mouth.add(new THREE.Mesh(mergeParts(R.parts), featMat));
+  R = Rig(); R.fx(0.2).add(CG.sph, LIP, 0.56, 0.18, 0.22, 0, -0.11, 0.0, -0.15, 0, 0, 0.5).fx(0); R.add(CG.sph, LIPD, 0.34, 0.06, 0.12, 0, -0.24, 0.05, 0, 0, 0, 0.2);
+  const lower = new THREE.Mesh(mergeParts(R.parts), featMat); mouth.add(lower);
+  // ojos: blanco apagado, iris brillante de color y párpados pesados que tapan la mitad de arriba
+  g.userData.eyes = []; g.userData.lids = [];
+  for (const s of [-1, 1]) {
+    const eye = new THREE.Group(); eye.position.set(0.66 * s, 0.28, surfZ(0.66 * s, 0.28) - 0.12); sway.add(eye);
+    R = Rig(); R.fx(0.45).add(CG.sph, SCL, 0.44, 0.28, 0.14, 0, 0, 0, 0, 0, 0, 0.3); eye.add(new THREE.Mesh(mergeParts(R.parts), featMat));
+    const iris = new THREE.Mesh(CG.sph, irisMat); iris.scale.set(0.21, 0.21, 0.06); iris.position.set(0, -0.04, 0.12); eye.add(iris);
+    const pupil = new THREE.Mesh(CG.sph, new THREE.MeshBasicMaterial({ color: 0x050008 })); pupil.scale.set(0.08, 0.09, 0.04); pupil.position.set(0, -0.04, 0.16); eye.add(pupil);
+    const lid = new THREE.Mesh(CG.half, lidMat); lid.scale.set(0.48, 0.32, 0.2); lid.position.set(0, 0.0, 0.02); eye.add(lid);
+    const lidEdge = new THREE.Mesh(CG.cyl, new THREE.MeshBasicMaterial({ color: 0x1c0612 })); lidEdge.scale.set(0.48, 0.04, 0.2); lidEdge.position.set(0, 0.0, 0.02); eye.add(lidEdge);
+    g.userData.eyes.push({ iris, pupil }); g.userData.lids.push(lid, lidEdge);
+  }
   const rays = new THREE.Mesh(buildFlames(), flameMat); rays.frustumCulled = false; h.add(rays); g.userData.rays = rays;
-
-  Object.assign(g.userData, { yaw: 0, blinkT: rand(3, 6), blink: 0, glowA: 0 });
+  Object.assign(g.userData, { yaw: 0, blinkT: rand(3, 6), blink: 0, glowA: 0, lower, mouthOpen: 0 });
   return g;
 }
-// Movimiento lento: la cara gira despacio hacia el jugador, se balancea y los ojos se encienden antes de atacar
+// Movimiento lento: la cara gira despacio hacia el jugador, se balancea, parpadea y abre la boca antes de atacar
 function animBoss(g, e, dt) {
   const u = g.userData; flameMat.uniforms.uTime.value = time; uLava.uTime.value = time;
   const want = Math.atan2(P.pos.x - g.position.x, P.pos.z - g.position.z);
@@ -1102,8 +1108,15 @@ function animBoss(g, e, dt) {
   u.sway.rotation.set(u.pitch + Math.sin(time * 0.37) * 0.05, Math.sin(time * 0.23) * 0.08, Math.sin(time * 0.31) * 0.06);
   u.blinkT -= dt; if (u.blinkT <= 0) { u.blink = 0.6; u.blinkT = rand(4, 7); }
   let close = 0; if (u.blink > 0) { u.blink -= dt; close = Math.sin(Math.max(0, u.blink) / 0.6 * Math.PI); }
+  // párpados pesados: tapan casi la mitad del ojo y bajan del todo al parpadear
+  for (const l of u.lids) { l.rotation.x = 0.46 + close * 0.9; l.position.y = -0.02 - close * 0.06; }
   u.glowA += ((e.shootT < 1.2 ? 1 - e.shootT / 1.2 : 0) - u.glowA) * Math.min(1, dt * 2.5);
-  for (const s of u.glows) s.material.opacity = (0.5 + 0.15 * Math.sin(time * 1.3) + 0.45 * u.glowA) * (1 - close);
+  irisMat.color.setHex(0x3ef0ff).multiplyScalar(1.0 + 0.15 * Math.sin(time * 1.3) + 0.6 * u.glowA);
+  // la mirada sigue un poco al jugador
+  const lx = Math.max(-0.08, Math.min(0.08, d * 0.3));
+  for (const ey of u.eyes) { ey.iris.position.x = lx; ey.pupil.position.x = lx; }
+  u.mouthOpen += ((e.shootT < 1.2 ? 1 - e.shootT / 1.2 : 0) - u.mouthOpen) * Math.min(1, dt * 2.5);
+  u.lower.position.y = -u.mouthOpen * 0.22;
   uLava.uGlow.value = e.hitT > 0 ? 0.35 : 0;
 }
 const B = { boss: buildBoss };
@@ -1968,8 +1981,7 @@ $('resumeBtn').onclick = togglePause;
   const btn = $('playBtn'), txt = btn.textContent, loader = new THREE.GLTFLoader();
   const load = url => new Promise((ok, ko) => loader.load(url, ok, undefined, ko));
   btn.disabled = true; btn.textContent = 'Cargando…';
-  Promise.all(['models/mago.glb', 'models/esqueleto.glb', 'models/encapuchado.glb', 'models/helioth-face.glb'].map(load)).then(([mg, sk, ho, hf]) => {
-    hf.scene.traverse(o => { if (o.isMesh && !heliothFaceGeo) heliothFaceGeo = prepFace(o.geometry); });
+  Promise.all(['models/mago.glb', 'models/esqueleto.glb', 'models/encapuchado.glb'].map(load)).then(([mg, sk, ho]) => {
     setupMage(mg);
     registerType('skeleton', bakeGltf(sk, 1.9, { vein: (r, g, b) => b > 0.6 && b > r * 1.1 }));   // huesos de piedra con venas eléctricas
     registerType('hooded', bakeGltf(ho, 2.2, { eyes: { x: 0.17, y: 0.42, z: 0.22, r: 0.11, color: PAL.acid } }));
