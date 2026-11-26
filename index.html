@@ -1693,7 +1693,7 @@ const DB = {
     phoenixFeather:{ active: false, name: 'Pluma de Fénix',             desc: 'Al morir, renaces una vez con toda la vida.', from: 'común', rarity: 'legendario' },
   },
   // Bolitas de experiencia (valor, color, tamaño)
-  orbs: [ { v: 1, color: 0x5ff6ff, s: 0.3 }, { v: 5, color: 0xd070ff, s: 0.4 }, { v: 25, color: 0xffc020, s: 0.52, aura: true }, { v: 100, color: 0xff3050, s: 0.72, aura: true } ],
+  orbs: [ { v: 1, color: 0x5ff6ff, s: 0.22 }, { v: 5, color: 0xd070ff, s: 0.3 }, { v: 25, color: 0xffc020, s: 0.4, aura: true }, { v: 100, color: 0xff3050, s: 0.56, aura: true } ],
   // Curvas de dificultad (t en minutos). Ver "Equilibrio" en docs/DISENO.md
   curve: {
     hp: t => (1 + 0.12 * Math.min(t, 15) + 0.012 * Math.min(t, 15) ** 2) * Math.pow(1.15, Math.max(0, t - 15)),
@@ -1822,7 +1822,7 @@ function styleOrb(gm) {
   m.material = ORB_MAT[t]; m.scale.setScalar(o.s);
   if (o.aura && !m.userData.aura) {
     const a = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: o.color, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending }));
-    a.scale.setScalar(t === 3 ? 4 : 3); m.add(a); m.userData.aura = a;
+    a.scale.setScalar(t === 3 ? 3.2 : 2.3); m.add(a); m.userData.aura = a;
   }
 }
 function dropGem(x, z, v) {
