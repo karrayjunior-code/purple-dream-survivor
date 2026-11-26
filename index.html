@@ -974,7 +974,7 @@ const lavaCompile = vein => sh => {
     .replace('#include <color_fragment>', `#include <color_fragment>
       float ao = vColor.r;                                                         // 1 = expuesto, 0 = hueco profundo
       float mot = rough(vObj * 0.7);
-      diffuseColor.rgb = mix(vec3(0.45, 0.08, 0.02), vec3(0.95, 0.38, 0.1), mix(0.55 + 0.45 * mot, 0.8 + 0.2 * mot, uFace)) * mix(0.02, 1.0, pow(ao, 2.5)) * mix(1.0, 0.55, uFace);
+      diffuseColor.rgb = mix(vec3(0.45, 0.08, 0.02), vec3(0.95, 0.38, 0.1), mix(0.55 + 0.45 * mot, 0.88 + 0.12 * mot, uFace)) * mix(0.02, 1.0, pow(ao, 2.5)) * mix(1.0, 0.55, uFace);
       // zonas de la cara (vReg: x ojos, y cejas, z labios, w barba), solo en la cara
       vec4 rg = vReg * uFace; float aoS = mix(0.05, 1.0, pow(ao, 1.6));
       vec3 beardC = mix(vec3(0.07, 0.015, 0.09), vec3(0.24, 0.06, 0.26), n3(vObj * 9.0)) * aoS;      // basalto morado casi negro
@@ -1092,13 +1092,13 @@ function prepFace(geo) {
   bakeCavity(geo, 90, 3);
   // cuencas de los ojos: en la escultura están en (±0.40, 0.13); se busca la superficie justo ahí
   const eyes = [-1, 1].map(sx => {
-    const ex = 0.4 * sx * FACE_S, ey = 0.13 * FACE_S; let zmax = -9, best = 9;
-    for (let i = 0; i < n; i++) { const d = Math.hypot(p.getX(i) - ex, p.getY(i) - ey); if (d < 0.1) zmax = Math.max(zmax, p.getZ(i)); }
+    const ex = (sx < 0 ? -0.32 : 0.31) * FACE_S, ey = 0.11 * FACE_S; let zmax = -9, best = 9;
+    for (let i = 0; i < n; i++) { const d = Math.hypot(p.getX(i) - ex, p.getY(i) - ey); if (d < 0.2) zmax = Math.max(zmax, p.getZ(i)); }
     return new THREE.Vector3(ex, ey, zmax > -9 ? zmax : FACE_Z - 0.3);
   });
   return { geo, eyes };
 }
-const FACE_S = 1.9, SUN_K = 0.6, FACE_Z = HR * SUN_K + 0.75;                  // escala de la cara, aplanado frontal del sol y profundidad de la cara                             // escala y posición de la cara; ángulo (rad) del hueco frontal de la esfera
+const FACE_S = 1.5, SUN_K = 0.6, FACE_Z = HR * SUN_K + 0.6;                  // escala de la cara, aplanado frontal del sol y profundidad de la cara                             // escala y posición de la cara; ángulo (rad) del hueco frontal de la esfera
 function buildBoss() {
   const g = new THREE.Group(), h = new THREE.Group(); h.position.y = 3.4; g.add(h); g.userData.float = h; g.userData.fy = 3.4;
   const sway = new THREE.Group(); h.add(sway); g.userData.sway = sway;
@@ -1110,10 +1110,18 @@ function buildBoss() {
   if (heliothFaceGeo) {
     const face = new THREE.Mesh(heliothFaceGeo.geo, faceLavaMat); sway.add(face);
     // brillo tenue al fondo de cada cuenca, bajo los párpados
-    g.userData.glows = heliothFaceGeo.eyes.map(e => {
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffe07a, transparent: true, opacity: 0.55, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending }));
-      sp.position.set(e.x, e.y - 0.03, e.z - 0.02); sp.scale.set(0.55, 0.32, 1); sway.add(sp); return sp;
+    // ojos pintados en tres capas (blanco, iris que sigue al jugador, párpado que parpadea) + halo verde
+    const EW = 0.34 * FACE_S, EH = 0.2 * FACE_S;
+    g.userData.eyes = heliothFaceGeo.eyes.map((e, k) => {
+      const grp = new THREE.Group(); grp.position.set(e.x, e.y, e.z + 0.03); grp.rotation.y = (k ? 1 : -1) * 0.25; sway.add(grp);
+      const pl = (tex, w, h, z, add) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, fog: false, blending: add ? THREE.AdditiveBlending : THREE.NormalBlending })); m.position.z = z; m.renderOrder = 5; grp.add(m); return m; };
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0x8cff1a, transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending })); halo.scale.set(EW * 1.6, EH * 1.4, 1); halo.position.z = -0.02; grp.add(halo);
+      const white = pl(eyeWhiteTex, EW, EW, 0, false);
+      const iris = pl(eyeIrisTex, EH * 0.95, EH * 0.95, 0.004, false);
+      const lid = pl(eyeLidTex, EW * 1.04, EW * 1.04, 0.008, false); lid.position.y = 0;
+      return { grp, iris, lid, halo };
     });
+    g.userData.glows = [];
   } else g.userData.glows = [];
   const rays = new THREE.Mesh(buildFlames(), flameMat); rays.frustumCulled = false; h.add(rays); g.userData.rays = rays;
 
@@ -1134,6 +1142,15 @@ function animBoss(g, e, dt) {
   let close = 0; if (u.blink > 0) { u.blink -= dt; close = Math.sin(Math.max(0, u.blink) / 0.6 * Math.PI); }
   u.glowA += ((e.shootT < 1.2 ? 1 - e.shootT / 1.2 : 0) - u.glowA) * Math.min(1, dt * 2.5);
   for (const s of u.glows) s.material.opacity = (0.5 + 0.15 * Math.sin(time * 1.3) + 0.45 * u.glowA) * (1 - close);
+  if (u.eyes) {
+    const lx = Math.max(-1, Math.min(1, Math.sin(want - u.yaw) * 3)), EH = 0.2 * FACE_S;
+    for (const ey of u.eyes) {
+      ey.iris.position.x += (lx * EH * 0.35 - ey.iris.position.x) * Math.min(1, dt * 3);
+      ey.lid.position.y = -close * EH * 0.55;                                  // el párpado baja al parpadear
+      ey.halo.material.opacity = 0.35 + 0.15 * Math.sin(time * 1.3) + 0.6 * u.glowA;
+      ey.iris.material.color.setScalar(1 + u.glowA * 0.6);
+    }
+  }
   uLava.uGlow.value = e.hitT > 0 ? 0.35 : 0;
 }
 const B = { boss: buildBoss };
@@ -1344,6 +1361,28 @@ const PN = 1000, pPos = new Float32Array(PN * 3).fill(-999), pCol = new Float32A
 let pNext = 0;
 const pGeo = new THREE.BufferGeometry();
 pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3)); pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
+// Ojos de Helioth: esclerótica amarillenta, iris verde ácido brillante con pupila de rendija y párpado superior pesado
+const eyeWhiteTex = canvasTex(128, (g, s) => {
+  g.save(); g.beginPath(); g.ellipse(s / 2, s / 2, s * 0.47, s * 0.26, 0, 0, TAU); g.clip();
+  const gr = g.createRadialGradient(s / 2, s / 2, s * 0.05, s / 2, s / 2, s * 0.5); gr.addColorStop(0, '#fff4c2'); gr.addColorStop(0.7, '#e8c27a'); gr.addColorStop(1, '#7a2a10');
+  g.fillStyle = gr; g.fillRect(0, 0, s, s);
+  g.strokeStyle = 'rgba(150,20,20,0.55)'; g.lineWidth = 1.5;                                   // venillas rojas
+  for (let k = 0; k < 10; k++) { const a = rand(0, TAU); g.beginPath(); g.moveTo(s / 2 + Math.cos(a) * s * 0.46, s / 2 + Math.sin(a) * s * 0.25); g.quadraticCurveTo(s / 2 + Math.cos(a + 0.3) * s * 0.3, s / 2 + Math.sin(a + 0.3) * s * 0.16, s / 2 + Math.cos(a) * s * 0.2, s / 2 + Math.sin(a) * s * 0.1); g.stroke(); }
+  g.restore();
+  g.strokeStyle = '#1a0306'; g.lineWidth = 4; g.beginPath(); g.ellipse(s / 2, s / 2, s * 0.46, s * 0.25, 0, 0, TAU); g.stroke();
+});
+const eyeIrisTex = canvasTex(64, (g, s) => {
+  const gr = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2); gr.addColorStop(0, '#f4ff9a'); gr.addColorStop(0.45, '#8cff1a'); gr.addColorStop(0.85, '#1f6a00'); gr.addColorStop(1, 'rgba(10,40,0,0)');
+  g.fillStyle = gr; g.beginPath(); g.arc(s / 2, s / 2, s / 2, 0, TAU); g.fill();
+  g.fillStyle = '#050008'; g.beginPath(); g.ellipse(s / 2, s / 2, s * 0.07, s * 0.33, 0, 0, TAU); g.fill();     // pupila de rendija
+});
+const eyeLidTex = canvasTex(128, (g, s) => {
+  // párpado superior: tapa ~40% del ojo con un borde curvo y oscuro, como la piel de lava ennegrecida
+  g.save(); g.beginPath(); g.ellipse(s / 2, s / 2, s * 0.47, s * 0.26, 0, 0, TAU); g.clip();                       // solo dentro del ojo
+  g.beginPath(); g.moveTo(0, 0); g.lineTo(s, 0); g.lineTo(s, s * 0.5); g.quadraticCurveTo(s / 2, s * 0.36, 0, s * 0.5); g.closePath();
+  const gr = g.createLinearGradient(0, s * 0.2, 0, s * 0.48); gr.addColorStop(0, '#5a1205'); gr.addColorStop(1, '#2a0402');
+  g.fillStyle = gr; g.fill(); g.strokeStyle = '#100002'; g.lineWidth = 5; g.beginPath(); g.moveTo(0, s * 0.5); g.quadraticCurveTo(s / 2, s * 0.36, s, s * 0.5); g.stroke(); g.restore();
+});
 const glowTex = canvasTex(32, (g, s) => { const gr = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2); gr.addColorStop(0, '#fff'); gr.addColorStop(0.35, 'rgba(255,255,255,0.6)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, s, s); });
 const particles = new THREE.Points(pGeo, new THREE.PointsMaterial({ size: 0.6, map: glowTex, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
 particles.frustumCulled = false; scene.add(particles);
