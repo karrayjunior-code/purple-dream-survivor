@@ -96,6 +96,9 @@ Sacada de capturas de la tendencia "old dark fantasy" (CGI de finales de los 90)
 - Implementado: 6 poderes, 5 pasivas, 6 tipos de enemigo, jefe Helioth a los 2:30, joystick táctil, pausa, mejor tiempo guardado.
 - Pendiente: resto de jefes, balance de dificultad, SDK de CrazyGames.
 
+## Diseño completo
+- El plan del juego completo (poderes, evoluciones, fusiones, Dones, jefes, cofres, personajes, árbol de mejoras, escenarios) está en `docs/DISENO.md`, dividido en 9 fases. Cada fase se pide por número; si algo no encaja con el código, propón antes de hacerlo.
+
 ## Forma de trabajar
 - El dueño prueba desde el **móvil** usando el enlace de GitHub Pages: después de cada cambio, haz commit y push a `main` para que se publique.
 - Una o dos mejoras por vez; antes de subir, comprueba que el juego arranca sin errores.
